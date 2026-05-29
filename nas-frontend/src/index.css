@@ -1,0 +1,266 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* =======================================
+   THEMES
+======================================= */
+
+:root {
+
+  --radius: 1rem;
+
+  --background: #09090b;
+  --foreground: #fafafa;
+
+  --card: rgba(255,255,255,0.04);
+
+  --border: rgba(255,255,255,0.08);
+
+  --primary: #ffffff;
+
+  --muted: rgba(255,255,255,0.05);
+
+  --sidebar: rgba(255,255,255,0.03);
+
+  --glass:
+    rgba(255,255,255,0.04);
+
+  --topbar:
+    rgba(255,255,255,0.03);
+
+  --hover:
+    rgba(255,255,255,0.07);
+}
+
+/* LIGHT */
+
+[data-theme="light"] {
+
+  --background: #f4f7fb;
+  --foreground: #111827;
+
+  --card: rgba(255,255,255,0.8);
+
+  --border: rgba(0,0,0,0.08);
+
+  --primary: #111827;
+
+  --muted: rgba(0,0,0,0.03);
+
+  --sidebar: rgba(255,255,255,0.7);
+
+  --glass:
+    rgba(255,255,255,0.6);
+
+  --topbar:
+    rgba(255,255,255,0.7);
+
+  --hover:
+    rgba(0,0,0,0.04);
+}
+
+/* MIDNIGHT */
+
+[data-theme="midnight"] {
+
+  --background: #020617;
+  --foreground: #e2e8f0;
+
+  --primary: #3b82f6;
+
+  --card:
+    rgba(15,23,42,0.7);
+
+  --sidebar:
+    rgba(15,23,42,0.75);
+
+  --glass:
+    rgba(15,23,42,0.55);
+
+  --topbar:
+    rgba(15,23,42,0.6);
+
+  --hover:
+    rgba(59,130,246,0.12);
+}
+
+/* CYBERPUNK */
+
+[data-theme="cyberpunk"] {
+
+  --background: #090014;
+  --foreground: #f5d0fe;
+
+  --primary: #ff00ff;
+
+  --card:
+    rgba(255,0,255,0.08);
+
+  --sidebar:
+    rgba(10,0,25,0.75);
+
+  --glass:
+    rgba(255,0,255,0.08);
+
+  --topbar:
+    rgba(10,0,25,0.8);
+
+  --hover:
+    rgba(255,0,255,0.12);
+}
+
+/* OCEAN */
+
+[data-theme="ocean"] {
+
+  --background: #031525;
+  --foreground: #dbeafe;
+
+  --primary: #06b6d4;
+
+  --card:
+    rgba(0,180,255,0.06);
+
+  --sidebar:
+    rgba(0,20,40,0.8);
+
+  --glass:
+    rgba(0,180,255,0.08);
+
+  --topbar:
+    rgba(0,20,40,0.8);
+
+  --hover:
+    rgba(0,180,255,0.12);
+}
+
+/* EMERALD */
+
+[data-theme="emerald"] {
+
+  --background: #02140f;
+  --foreground: #d1fae5;
+
+  --primary: #10b981;
+
+  --card:
+    rgba(16,185,129,0.08);
+
+  --sidebar:
+    rgba(2,20,15,0.8);
+
+  --glass:
+    rgba(16,185,129,0.08);
+
+  --topbar:
+    rgba(2,20,15,0.8);
+
+  --hover:
+    rgba(16,185,129,0.12);
+}
+
+/* AMOLED */
+
+[data-theme="amoled"] {
+
+  --background: #000000;
+  --foreground: #ffffff;
+
+  --primary: #ffffff;
+
+  --card:
+    rgba(255,255,255,0.03);
+
+  --sidebar:
+    rgba(0,0,0,0.92);
+
+  --glass:
+    rgba(255,255,255,0.03);
+
+  --topbar:
+    rgba(0,0,0,0.95);
+
+  --hover:
+    rgba(255,255,255,0.08);
+}
+
+/* =======================================
+   BASE
+======================================= */
+
+body {
+
+  background:
+    var(--background);
+
+  color:
+    var(--foreground);
+
+  overflow: hidden;
+
+  font-family:
+    Inter,
+    sans-serif;
+}
+
+* {
+
+  border-color:
+    var(--border);
+}
+
+/* =======================================
+   GLASS
+======================================= */
+
+.glass {
+
+  background:
+    var(--glass);
+
+  backdrop-filter:
+    blur(24px);
+}
+
+/* =======================================
+   APP BG
+======================================= */
+
+.app-gradient {
+
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(59,130,246,0.15),
+      transparent 25%
+    ),
+
+    radial-gradient(
+      circle at bottom right,
+      rgba(168,85,247,0.15),
+      transparent 25%
+    );
+}
+
+/* =======================================
+   SCROLLBAR
+======================================= */
+
+::-webkit-scrollbar {
+
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+
+  background:
+    rgba(255,255,255,0.1);
+
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+
+  background: transparent;
+}
