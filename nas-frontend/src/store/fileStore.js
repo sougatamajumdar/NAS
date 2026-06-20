@@ -2,6 +2,10 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import api from "@/services/api"
 import { storeAction } from "@/store/storeActions"
+import {
+  sha256,
+  createChunks,
+} from "@/utils/uploadUtils"
 
 
 const fetchControllers = new Map()
@@ -33,50 +37,60 @@ export const useFileStore = create(
       previewLoading: false,
       previewError: null,
 
+      storageStats: null,
       // disk status
       diskStatus: [],
       diskStatusMap: {},
       diskStatusLoading: false,
       hasActiveDisk: false,
+      canAllocateDisk: false,
       // =========================
       // UPLOAD HELPERS
       // =========================
 
       addUpload: (upload) => {
-
         set((state) => ({
-          uploads: [...state.uploads, upload]
+          uploads: [...state.uploads, upload],
         }))
       },
 
-      updateUpload: (id, data) => {
-
+      updateUpload: (localId, data) => {
         set((state) => ({
           uploads: state.uploads.map((upload) =>
-            upload.id === id
+            upload.localId === localId
               ? { ...upload, ...data }
               : upload
-          )
+          ),
         }))
       },
 
-      removeUpload: (id) => {
-
+      removeUpload: (localId) => {
         set((state) => ({
           uploads: state.uploads.filter(
-            (upload) => upload.id !== id
-          )
+            (upload) =>
+              upload.localId !== localId
+          ),
         }))
+      },
+
+      getUpload: (localId) => {
+        return get().uploads.find(
+          (upload) =>
+            upload.localId === localId
+        )
       },
 
       // =========================
       // FETCH NODES
       // =========================
 
-      fetchNodes: async (parentId = null) => {
+      fetchNodes: async (
+        parentId = null,
+        page = 1
+      ) => {
 
         const requestKey =
-          parentId || "root"
+          `${parentId || "root"}-${page}`
 
         if (fetchControllers.has(requestKey)) {
 
@@ -100,51 +114,66 @@ export const useFileStore = create(
 
         try {
 
-          let url = "/nodes/"
+          const params =
+            new URLSearchParams()
+
+          params.append("page", page)
 
           if (parentId) {
-            url += `?parent_id=${parentId}`
+            params.append(
+              "parent_id",
+              parentId
+            )
           }
 
-          const response = await api.get(
-            url,
-            {
-              signal: controller.signal
-            }
-          )
+          const response =
+            await api.get(
+              `/nodes/?${params.toString()}`,
+              {
+                signal:
+                  controller.signal
+              }
+            )
 
           set({
-            nodes: response.data,
-            currentFolder: parentId,
+            nodes:
+              response.data.results || [],
+            currentFolder:
+              parentId,
+
+            pagination: {
+              count:
+                response.data.count || 0,
+
+              next:
+                response.data.next,
+
+              previous:
+                response.data.previous,
+
+              currentPage:
+                page,
+            },
           })
 
         } catch (error) {
 
           if (
-            error.name === "CanceledError" ||
-            error.code === "ERR_CANCELED"
+            error.name ===
+              "CanceledError" ||
+            error.code ===
+              "ERR_CANCELED"
           ) {
             return
           }
 
           console.error(error)
 
-          if (
-            error.response?.status === 404
-          ) {
-
-            set({
-              currentFolder: null,
-              folderStack: [],
-              nodes: [],
-            })
-
-            await get().fetchNodes(null)
-
-            return
-          }
-
         } finally {
+
+          fetchControllers.delete(
+            requestKey
+          )
 
           set({
             fileLoading: false
@@ -174,11 +203,15 @@ export const useFileStore = create(
         })
 
         await get().fetchNodes(
-          currentFolder
+          currentFolder,
+          1
         )
       },
 
-      searchNodes: async (query) => {
+      searchNodes: async (
+        query,
+        page = 1
+      ) => {
 
         if (!query.trim()) {
 
@@ -197,18 +230,42 @@ export const useFileStore = create(
           const currentFolder =
             get().currentFolder
 
-          let url =
-            `/search/?q=${encodeURIComponent(query)}`
+          const params =
+            new URLSearchParams()
+
+          params.append("q", query)
+          params.append("page", page)
 
           if (currentFolder) {
-            url += `&parent_id=${currentFolder}`
+
+            params.append(
+              "parent_id",
+              currentFolder
+            )
           }
 
           const response =
-            await api.get(url)
+            await api.get(
+              `/search/?${params.toString()}`
+            )
 
           set({
-            nodes: response.data,
+            nodes:
+              response.data.results || [],
+
+            pagination: {
+              count:
+                response.data.count || 0,
+
+              next:
+                response.data.next,
+
+              previous:
+                response.data.previous,
+
+              currentPage:
+                page,
+            },
           })
 
         } catch (error) {
@@ -228,7 +285,12 @@ export const useFileStore = create(
       // =========================
 
       createFolder: async (data) => {
-
+        const validation = await get().validateDiskOperation({
+          operation: "create",
+        })
+        if (!validation.valid) {
+          throw new Error(validation.error)
+        }
         return await storeAction({
 
           action: async () => {
@@ -254,119 +316,17 @@ export const useFileStore = create(
           showSuccess: true,
         })
       },
-
-      // =========================
-      // UPLOAD FILE
-      // =========================
-
-      uploadFile: async (
-        file,
-        parentId = null
-      ) => {
-
-        const uploadId =
-          crypto.randomUUID()
-
-        get().addUpload({
-          id: uploadId,
-          name: file.name,
-          progress: 0,
-          status: "uploading",
-          size: file.size,
-        })
-
-        const formData =
-          new FormData()
-
-        formData.append(
-          "file",
-          file
-        )
-
-        if (parentId) {
-
-          formData.append(
-            "parent_id",
-            parentId
-          )
-        }
-
-        try {
-
-          await api.post(
-            "/upload/",
-            formData,
-            {
-              headers: {
-                "Content-Type":
-                  "multipart/form-data"
-              },
-
-              onUploadProgress:
-                (progressEvent) => {
-
-                  if (!progressEvent.total) {
-                    return
-                  }
-
-                  const percent =
-                    Math.round(
-                      (
-                        progressEvent.loaded *
-                        100
-                      ) /
-                      progressEvent.total
-                    )
-
-                  get().updateUpload(
-                    uploadId,
-                    {
-                      progress: percent
-                    }
-                  )
-                }
-            }
-          )
-
-          get().updateUpload(
-            uploadId,
-            {
-              progress: 100,
-              status: "completed"
-            }
-          )
-
-          await get().fetchNodes(
-            get().currentFolder
-          )
-
-          setTimeout(() => {
-
-            get().removeUpload(
-              uploadId
-            )
-
-          }, 1500)
-
-        } catch (error) {
-
-          console.error(error)
-
-          get().updateUpload(
-            uploadId,
-            {
-              status: "failed"
-            }
-          )
-        }
-      },
-
-      // =========================
+            // =========================
       // DELETE
       // =========================
 
       deleteNode: async (nodeId) => {
-
+        const validation = await get().validateDiskOperation({
+          operation: "delete",
+        });
+        if (!validation.valid) {
+          throw new Error(validation.error)
+        }
         return await storeAction({
 
           action: async () => {
@@ -405,7 +365,7 @@ export const useFileStore = create(
 
           set({
             sharedNodes:
-              response.data
+              response.data.results || []
           })
 
         } catch (error) {
@@ -450,7 +410,182 @@ export const useFileStore = create(
         }
       },
 
+      fetchStorageStats: async () => {
+        const response =
+          await api.get("/storage/stats/")
+
+        set({
+          storageStats: response.data
+        })
+      },
       // =========================
+      // UPLOAD FILE
+      // =========================
+      uploadFile: async (
+        file,
+        parentId = null
+      ) => {
+
+        const localId =
+          crypto.randomUUID()
+
+        const controller =
+          new AbortController()
+
+        try {
+
+          get().addUpload({
+            localId,
+
+            uploadId: null,
+
+            file,
+            parentId,
+
+            name: file.name,
+            size: file.size,
+
+            progress: 0,
+
+            uploadedChunks: 0,
+            totalChunks: 0,
+
+            status: "hashing",
+
+            speed: 0,
+            remaining: 0,
+
+            error: null,
+
+            controller,
+
+            uploadedBytes: 0,
+
+            startedAt: Date.now(),
+          })
+          const validation =
+            await get().validateDiskOperation({
+              operation: "upload",
+              fileSize: file.size,
+            })
+
+          if (!validation.valid) {
+            throw new Error(validation.error)
+          }
+          // HASH
+          const hash =
+            await sha256(file)
+
+          const chunks =
+            createChunks(file)
+
+          get().updateUpload(
+            localId,
+            {
+              hash,
+              totalChunks:
+                chunks.length,
+              status:
+                "initiating",
+            }
+          )
+
+          // INITIATE
+          const chunkSize =
+            chunks[0]?.size || file.size
+
+          const initiateResponse =
+            await api.post(
+              "/upload/initiate/",
+              {
+                filename: file.name,
+                total_size: file.size,
+                total_chunks: chunks.length,
+                chunk_size: chunkSize,
+                file_hash: hash,
+                parent_id: parentId,
+              }
+            )
+
+          const uploadId =
+            initiateResponse.data
+              .upload_id
+
+          get().updateUpload(
+            localId,
+            {
+              uploadId,
+              status:
+                "uploading",
+            }
+          )
+
+          await get().uploadChunks(
+            localId
+          )
+
+        } catch (error) {
+
+          console.error("upload error-", error)
+
+          get().updateUpload(
+            localId,
+            {
+              status: "failed",
+              error:
+                error.message,
+            }
+          )
+        }
+      },
+
+          pauseUpload: (
+        localId
+      ) => {
+
+        const upload =
+          get().getUpload(
+            localId
+          )
+
+        if (!upload) return
+
+        get().updateUpload(
+          localId,
+          {
+            status: "paused",
+          }
+        )
+      },
+      
+      resumeUpload: async (
+        localId
+      ) => {
+
+        const upload =
+          get().getUpload(
+            localId
+          )
+
+        if (!upload) return
+
+        get().updateUpload(
+          localId,
+          {
+            status:
+              "uploading",
+          }
+        )
+
+      await get().syncUploadStatus(
+        localId
+      )
+
+      await get().uploadChunks(
+        localId
+      )
+      },
+            // =========================
       // PREVIEW
       // =========================
 
@@ -475,14 +610,12 @@ export const useFileStore = create(
             previewUrl: null,
           })
 
-          const response =
-            await api.get(
-              `/download/${file.id}/`,
-              {
-                responseType:
-                  "blob",
-              }
-            )
+          const response = await api.get(
+            `/preview/${file.id}/`,
+            {
+              responseType: "blob",
+            }
+          )
 
           const blobUrl =
             URL.createObjectURL(
@@ -562,7 +695,8 @@ export const useFileStore = create(
             diskStatusMap: map,
             hasActiveDisk:
               response.data.has_active_disk,
-
+            canAllocateDisk:
+              response.data.can_allocate_disk,
             diskStatusLoading: false,
           })
 
@@ -588,7 +722,8 @@ export const useFileStore = create(
 
             const {
               diskStatus,
-              hasActiveDisk
+              hasActiveDisk,
+              canAllocateDisk
             } = get()
 
             console.log(
@@ -601,7 +736,7 @@ export const useFileStore = create(
             )
 
             // INVALID RESPONSE
-            if (!hasActiveDisk === undefined) {
+            if (hasActiveDisk === undefined) {
 
               return {
                 valid: false,
@@ -611,6 +746,16 @@ export const useFileStore = create(
 
             // NO ACTIVE DISK
             if (!hasActiveDisk) {
+
+              if (
+                operation === "upload" &&
+                canAllocateDisk
+              ) {
+
+                return {
+                  valid: true
+                }
+              }
 
               return {
                 valid: false,
@@ -655,7 +800,7 @@ export const useFileStore = create(
               const writableDisks =
                 onlineDisks.filter(
                   (disk) =>
-                    disk.is_read_only !== true
+                    disk.is_writable === true
                 )
 
               if (writableDisks.length === 0) {
@@ -702,6 +847,160 @@ export const useFileStore = create(
               error: "Validation failed"
             }
           }
+      },
+
+            renameNode: async (
+        nodeId,
+        name
+      ) => {
+
+        return await storeAction({
+
+          action: async () => {
+
+            await api.patch(
+              `/rename/${nodeId}/`,
+              { name }
+            )
+
+            await get().fetchNodes(
+              get().currentFolder
+            )
+          },
+
+          set,
+
+          successMessage:
+            "Renamed successfully",
+
+          errorMessage:
+            "Rename failed",
+
+          showSuccess: true,
+        })
+      },
+
+      cancelUpload: async (
+        localId
+      ) => {
+
+        const upload =
+          get().getUpload(
+            localId
+          )
+
+        if (!upload) return
+
+        try {
+
+          upload.controller.abort()
+
+          if (
+            upload.uploadId
+          ) {
+
+            await api.delete(
+              `/upload/cancel/${upload.uploadId}/`
+            )
+          }
+
+        } catch (error) {
+
+          console.error(error)
+
+        } finally {
+
+          get().updateUpload(
+            localId,
+            {
+              status:
+                "cancelled",
+            }
+          )
+
+          setTimeout(() => {
+
+            get().removeUpload(
+              localId
+            )
+
+          }, 1000)
+        }
+      },
+
+            moveNode: async (
+        nodeId,
+        parentId
+      ) => {
+
+        return await storeAction({
+
+          action: async () => {
+
+            await api.patch(
+              `/move/${nodeId}/`,
+              {
+                parent_id:
+                  parentId
+              }
+            )
+
+            await get().fetchNodes(
+              get().currentFolder
+            )
+          },
+
+          set,
+
+          successMessage:
+            "Moved successfully",
+
+          errorMessage:
+            "Move failed",
+
+          showSuccess: true,
+        })
+      },
+      syncUploadStatus: async (
+        localId
+      ) => {
+
+        const upload =
+          get().getUpload(localId)
+
+        if (
+          !upload ||
+          !upload.uploadId
+        ) {
+          return
+        }
+
+        try {
+
+          const response =
+            await api.get(
+              `/upload/status/${upload.uploadId}/`
+            )
+
+          const uploadedIndexes =
+            response.data
+              .uploaded_chunks || []
+
+          get().updateUpload(
+            localId,
+            {
+              uploadedChunkIndexes:
+                uploadedIndexes,
+
+              uploadedChunks:
+                uploadedIndexes.length,
+            }
+          )
+
+        } catch (error) {
+
+          console.error(error)
+        }
       },
       // =========================
       // DOWNLOAD
@@ -753,6 +1052,339 @@ export const useFileStore = create(
         }
       },
 
+      resumePendingUploads:
+        async () => {
+
+          const uploads =
+            get().uploads
+
+          for (
+            const upload
+            of uploads
+          ) {
+
+            if (
+              upload.status ===
+                "uploading" ||
+              upload.status ===
+                "paused"
+            ) {
+
+              try {
+
+                const response =
+                  await api.get(
+                    `/upload/status/${upload.uploadId}/`
+                  )
+
+                const uploadedIndexes =
+                  response.data.uploaded_chunks || []
+
+                get().updateUpload(
+                  upload.localId,
+                  {
+                    uploadedChunkIndexes:
+                      uploadedIndexes,
+
+                    uploadedChunks:
+                      uploadedIndexes.length,
+                  }
+                )
+
+              } catch (
+                error
+              ) {
+                console.error(
+                  error
+                )
+              }
+            }
+          }
+        },
+        shareNode: async (
+          nodeId,
+          sharedUserId
+        ) => {
+
+          return await storeAction({
+
+            action: async () => {
+
+              await api.post(
+                "/share/",
+                {
+                  node_id: nodeId,
+                  shared_user_id:
+                    sharedUserId,
+                }
+              )
+            },
+
+            set,
+
+            successMessage:
+              "Shared successfully",
+
+            errorMessage:
+              "Share failed",
+
+            showSuccess: true,
+          })
+        },
+        pagination: {
+        count: 0,
+        next: null,
+        previous: null,
+        currentPage: 1,
+      },
+
+      setPage: (page) => {
+        set((state) => ({
+          pagination: {
+            ...state.pagination,
+            currentPage: page,
+          },
+        }))
+      },
+        searchUsers: async (query) => {
+
+          const response =
+            await api.get(
+              `/users/search/?q=${query}`
+            )
+
+          return response.data
+        },
+        refreshCurrentView: async () => {
+
+          const {
+            searchMode,
+            searchQuery,
+            currentFolder,
+          } = get()
+
+          if (
+            searchMode &&
+            searchQuery
+          ) {
+
+            return get().searchNodes(
+              searchQuery
+            )
+          }
+
+          return get().fetchNodes(
+            currentFolder
+          )
+        },
+        getThumbnailUrl: (fileId) => {
+          return `${api.defaults.baseURL}/thumbnail/${fileId}/`
+        },
+      uploadChunks: async (
+        localId
+      ) => {
+
+        const upload =
+          get().getUpload(
+            localId
+          )
+
+        if (!upload) return
+
+        const {
+          file,
+          uploadId,
+          controller,
+        } = upload
+
+        const chunks =
+          createChunks(file)
+
+        let uploadedBytes =
+          upload.uploadedBytes || 0
+
+        const startTime =
+          Date.now()
+        const uploadedSet = new Set(
+          upload.uploadedChunkIndexes || []
+        )
+        for (let index = 0; index < chunks.length; index++) {
+          if (uploadedSet.has(index)) {
+              continue
+            }
+          const latest =
+            get().getUpload(
+              localId
+            )
+
+          if (
+            !latest ||
+            latest.status ===
+              "paused"
+          ) {
+            return
+          }
+
+          const chunk =
+            chunks[index]
+
+          const formData =
+            new FormData()
+
+          formData.append(
+            "upload_id",
+            uploadId
+          )
+
+          formData.append(
+            "chunk_index",
+            index
+          )
+
+          formData.append(
+            "chunk",
+            chunk
+          )
+
+          await api.post(
+            "/upload/chunk/",
+            formData,
+            {
+              signal:
+                controller.signal,
+            }
+          )
+
+          uploadedBytes +=
+            chunk.size
+
+          uploadedSet.add(index)
+
+          const completed =
+            uploadedSet.size
+
+          const progress =
+            Math.round(
+              (completed * 100) / chunks.length
+            )
+
+          const elapsed =
+            (Date.now() -
+              startTime) /
+            1000
+
+          const speed =
+            uploadedBytes /
+            elapsed
+
+          const remaining =
+            (
+              file.size -
+              uploadedBytes
+            ) / speed
+
+          get().updateUpload(
+            localId,
+            {
+              uploadedChunks:
+                uploadedSet.size,
+
+              uploadedBytes,
+
+              progress,
+
+              speed,
+
+              remaining,
+            }
+          )
+        }
+
+        try {
+          await api.post(
+            "/upload/complete/",
+            {
+              upload_id: uploadId,
+            }
+          )
+        } catch (error) {
+
+          get().updateUpload(
+            localId,
+            {
+              status: "failed",
+              error:
+                error.response?.data?.error ||
+                "Upload failed",
+            }
+          )
+
+          return
+        }
+
+      get().updateUpload(
+        localId,
+        {
+          progress: 100,
+          status:
+            "completed",
+        }
+      )
+      setTimeout(() => {
+
+        get().removeUpload(
+          localId
+        )
+
+      }, 5000)
+      await get().fetchNodes(
+        get().currentFolder
+      )
+    },
+    resetStore: () => {
+
+      set({
+        nodes: [],
+        currentFolder: null,
+
+        uploads: [],
+
+        folderStack: [],
+
+        sharedNodes: [],
+
+        searchQuery: "",
+
+        searchLoading: false,
+        searchMode: false,
+
+        previewFile: null,
+        previewOpen: false,
+        previewUrl: null,
+        previewLoading: false,
+        previewError: null,
+
+        storageStats: null,
+
+        diskStatus: [],
+        diskStatusMap: {},
+
+        diskStatusLoading: false,
+
+        hasActiveDisk: false,
+        canAllocateDisk: false,
+
+        pagination: {
+          count: 0,
+          next: null,
+          previous: null,
+          currentPage: 1,
+        },
+      })
+    },
+    clearPersistedState: () => {
+      useFileStore.persist.clearStorage()
+    }
     }),
     {
       name: "file-store",

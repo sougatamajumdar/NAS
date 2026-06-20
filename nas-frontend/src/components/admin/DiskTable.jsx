@@ -11,12 +11,16 @@ import {
 import StorageBar from "./StorageBar"
 
 import { formatBytes } from "@/utils/formatters"
+import Pagination from "../common/Pagination.jsx"
 
 export default function DiskTable({
   disks,
+  count,
+  currentPage,
+  onPageChange,
   onDisable,
   onDelete,
-}) {
+}){
 
   return (
 
@@ -41,7 +45,17 @@ export default function DiskTable({
       </div>
 
       <div className="space-y-5">
-
+        {disks.length === 0 && (
+            <div
+              className="
+                py-10
+                text-center
+                text-muted-foreground
+              "
+            >
+              No disks configured
+            </div>
+          )}
         {disks.map((disk) => (
 
           <div
@@ -90,9 +104,15 @@ export default function DiskTable({
                 </button>
 
                 <button
-                  onClick={() =>
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        "Delete this disk?"
+                      )
+                    ) return
+
                     onDelete(disk.id)
-                  }
+                  }}
                   className="
                               h-10
                               w-10
@@ -174,7 +194,13 @@ export default function DiskTable({
         ))}
 
       </div>
-
+      <Pagination
+        currentPage={currentPage}
+        totalPages={
+          Math.ceil(count / 10)
+        }
+        onPageChange={onPageChange}
+      />
     </Card>
   )
 }

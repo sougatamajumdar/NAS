@@ -37,6 +37,7 @@ class StorageDisk(Document):
             "mount_path",
         ]
     }
+    
 
 # -------------------------------
 # User Storage Mapping
@@ -104,6 +105,8 @@ class Node(Document):
 
     size = LongField(default=0)
 
+    file_hash = StringField()
+    
     created_at = DateTimeField(
         default=datetime.datetime.utcnow
     )
@@ -124,6 +127,58 @@ class Node(Document):
         ]
     }
 
+
+# -------------------------------
+# Upload Session
+# -------------------------------
+class UploadSession(Document):
+
+    upload_id = StringField(
+        required=True,
+        unique=True
+    )
+
+    owner_id = IntField(required=True)
+
+    filename = StringField(required=True)
+
+    total_size = LongField(required=True)
+
+    total_chunks = IntField(required=True)
+
+    uploaded_chunks = ListField(
+        IntField(),
+        default=list
+    )
+
+    chunk_size = IntField(required=True)
+
+    parent = ReferenceField(
+        Node,
+        null=True
+    )
+
+    disk = ReferenceField(
+        StorageDisk,
+        required=True
+    )
+
+    temp_path = StringField(required=True)
+
+    is_completed = BooleanField(default=False)
+
+    created_at = DateTimeField(
+        default=datetime.datetime.utcnow
+    )
+    file_hash = StringField()
+    meta = {
+        "collection": "upload_sessions",
+        "indexes": [
+            "upload_id",
+            "owner_id",
+            "is_completed",
+        ]
+    }
 
 # -------------------------------
 # Share Model
@@ -150,6 +205,13 @@ class Share(Document):
             "shared_with_id",
             "node",
             ("shared_with_id", "node"),
+            {
+                "fields": [
+                    "shared_with_id",
+                    "node"
+                ],
+                "unique": True
+            }
         ]
     }
 

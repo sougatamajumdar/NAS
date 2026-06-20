@@ -7,9 +7,13 @@ import {
 import {
   Card
 } from "@/components/ui/card"
+import Pagination from "../common/Pagination.jsx"
 
 export default function UsersTable({
   users,
+  count,
+  currentPage,
+  onPageChange,
   onDelete,
   onToggleAdmin,
 }) {
@@ -73,7 +77,20 @@ export default function UsersTable({
           </thead>
 
           <tbody>
-
+            {users.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="
+                    py-10
+                    text-center
+                    text-muted-foreground
+                  "
+                >
+                  No users found
+                </td>
+              </tr>
+            )}
             {users.map((user) => (
 
               <tr
@@ -141,9 +158,17 @@ export default function UsersTable({
                     </button>
 
                     <button
-                      onClick={() =>
+                      onClick={() => {
+
+                        if (
+                          !window.confirm(
+                            "Delete this user?"
+                          )
+                        ) return
+
                         onDelete(user.id)
-                      }
+
+                      }}
                       className="
                                   h-10
                                   w-10
@@ -164,14 +189,20 @@ export default function UsersTable({
                 </td>
 
               </tr>
-            ))}
+            ))} 
 
           </tbody>
 
         </table>
 
       </div>
-
+      <Pagination
+        currentPage={currentPage}
+        totalPages={
+          Math.ceil(count / 10)
+        }
+        onPageChange={onPageChange}
+      />
     </Card>
   )
 }

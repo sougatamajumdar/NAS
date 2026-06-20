@@ -6,7 +6,9 @@ export default function StorageBar({
 }) {
 
   const percent =
-    ((used / total) * 100).toFixed(1)
+    total > 0
+      ? ((used / total) * 100).toFixed(1)
+      : 0
 
   return (
 

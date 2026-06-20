@@ -1,8 +1,9 @@
-from .models import StorageDisk, Node, UserStorageMapping
+from .models import StorageDisk, Node, UserStorageMapping, UploadSession
 import os
 import shutil
 from datetime import datetime
-
+from datetime import timedelta
+from django.utils import timezone
 
 BACKUP_ROOT = "backups"
 
@@ -18,7 +19,11 @@ def get_user_disk_status(user_id):
     disks_data = []
 
     has_active_disk = False
+    can_allocate_disk = False
 
+    # ----------------------------------------
+    # EXISTING USER DISKS
+    # ----------------------------------------
     for mapping in mappings:
 
         disk = mapping.disk
@@ -26,19 +31,21 @@ def get_user_disk_status(user_id):
         if not disk:
             continue
 
-        disk_online = False
-
-        disk_writable = False
-
         try:
 
-            disk_online = os.path.exists(
-                disk.mount_path
+            disk_online = (
+                disk.is_active and
+                os.path.exists(
+                    disk.mount_path
+                )
             )
 
-            disk_writable = os.access(
-                disk.mount_path,
-                os.W_OK
+            disk_writable = (
+                disk_online and
+                os.access(
+                    disk.mount_path,
+                    os.W_OK
+                )
             )
 
             if disk_online and disk_writable:
@@ -54,9 +61,7 @@ def get_user_disk_status(user_id):
                 "mount_path": disk.mount_path,
 
                 "is_active": disk.is_active,
-
                 "is_online": disk_online,
-
                 "is_writable": disk_writable,
 
                 "is_primary": mapping.is_primary,
@@ -74,9 +79,7 @@ def get_user_disk_status(user_id):
                 "mount_path": disk.mount_path,
 
                 "is_active": disk.is_active,
-
                 "is_online": False,
-
                 "is_writable": False,
 
                 "is_primary": mapping.is_primary,
@@ -86,9 +89,41 @@ def get_user_disk_status(user_id):
                 "free_space": None,
             })
 
+    # ----------------------------------------
+    # CAN SYSTEM ALLOCATE A NEW DISK?
+    # ----------------------------------------
+    try:
+
+        for disk in StorageDisk.objects.filter(
+            is_active=True
+        ):
+
+            try:
+
+                if not os.path.exists(
+                    disk.mount_path
+                ):
+                    continue
+
+                if not os.access(
+                    disk.mount_path,
+                    os.W_OK
+                ):
+                    continue
+
+                can_allocate_disk = True
+                break
+
+            except Exception:
+                continue
+
+    except Exception:
+        pass
+
     return {
         "has_active_disk": has_active_disk,
-        "disks": disks_data
+        "can_allocate_disk": can_allocate_disk,
+        "disks": disks_data,
     }
 
 
@@ -373,3 +408,36 @@ def create_disk_backup(disk):
     )
 
     return zip_path
+
+
+
+def cleanup_old_uploads():
+
+    cutoff = timezone.now() - timedelta(hours=24)
+
+    sessions = UploadSession.objects.filter(
+        is_completed=False,
+        created_at__lt=cutoff
+    )
+
+    for session in sessions:
+
+        shutil.rmtree(
+            session.temp_path,
+            ignore_errors=True
+        )
+
+        session.delete()
+
+def is_descendant(folder, target):
+
+    current = target
+
+    while current:
+
+        if str(current.id) == str(folder.id):
+            return True
+
+        current = current.parent
+
+    return False

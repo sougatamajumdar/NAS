@@ -7,6 +7,7 @@ import QuickStats from "@/components/dashboard/QuickStats"
 import FileActions from "@/components/files/FileActions"
 import UploadProgress from "@/components/upload/UploadProgress"
 import { useFileStore } from "@/store/fileStore"
+import PaginationBar from "@/components/files/PaginationBar"
 
 
 export default function DashboardPage() {
@@ -29,6 +30,9 @@ export default function DashboardPage() {
 
   const fileLoading = useFileStore(
     (state) => state.fileLoading
+  )
+  const uploads = useFileStore(
+    (state) => state.uploads
   )
 
   const initializedRef = useRef(false)
@@ -110,7 +114,11 @@ export default function DashboardPage() {
       <QuickStats />
 
       {/* UPLOADS */}
-      <UploadProgress />
+      {
+        uploads.length > 0 && (
+          <UploadProgress />
+        )
+      }
 
       {/* FILES */}
       {fileLoading ? (
@@ -130,9 +138,8 @@ export default function DashboardPage() {
       ) : (
 
         <FileGrid nodes={nodes} />
-
       )}
-
+      <PaginationBar />
       <FilePreviewModal />
 
     </div>

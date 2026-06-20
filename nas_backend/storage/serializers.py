@@ -67,7 +67,7 @@ class NodeListSerializer(serializers.Serializer):
     name = serializers.CharField()
     type = serializers.CharField()
 
-    size = serializers.IntegerField()
+    size = serializers.IntegerField(default=0)
 
     created_at = serializers.DateTimeField()
 
@@ -308,7 +308,23 @@ class AdminCreateUserSerializer(serializers.Serializer):
 
         return value
     
-class AdminUserListSerializer(serializers.Serializer):
+class AdminUserListSerializer(
+    serializers.ModelSerializer
+):
+
+    class Meta:
+
+        model = User
+
+        fields = (
+            "id",
+            "username",
+            "email",
+            "is_staff",
+            "is_superuser",
+            "is_active",
+            "date_joined",
+        )
     id = serializers.IntegerField()
     username = serializers.CharField()
     email = serializers.EmailField()
@@ -374,5 +390,59 @@ class LoginSerializer(serializers.Serializer):
             )
 
         data["user"] = user
+
+        return data
+    
+class InitiateUploadSerializer(serializers.Serializer):
+
+    filename = serializers.CharField()
+
+    total_size = serializers.IntegerField(
+        min_value=1
+    )
+
+    total_chunks = serializers.IntegerField(
+        min_value=1
+    )
+
+    chunk_size = serializers.IntegerField(
+        min_value=1
+    )
+
+    file_hash = serializers.CharField()
+
+    parent_id = serializers.CharField(
+        required=False,
+        allow_null=True
+    )
+
+    def validate(self, data):
+
+        request = self.context["request"]
+
+        parent_id = data.get("parent_id")
+
+        if parent_id:
+
+            try:
+                parent = Node.objects.get(
+                    id=parent_id,
+                    owner_id=request.user.id
+                )
+
+            except Node.DoesNotExist:
+                raise serializers.ValidationError(
+                    "Parent folder not found"
+                )
+
+            if parent.type != "FOLDER":
+                raise serializers.ValidationError(
+                    "Parent must be a folder"
+                )
+
+            data["parent"] = parent
+
+        else:
+            data["parent"] = None
 
         return data

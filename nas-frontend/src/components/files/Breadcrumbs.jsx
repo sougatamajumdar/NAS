@@ -27,7 +27,7 @@ export default function Breadcrumbs() {
       folderStack: newStack
     })
 
-    fetchNodes(folder.id)
+    fetchNodes(folder.id, 1)
   }
 
   return (

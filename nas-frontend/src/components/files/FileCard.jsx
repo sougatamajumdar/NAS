@@ -71,7 +71,7 @@ export default function FileCard({ node }) {
       folderStack: newStack
     })
 
-    fetchNodes(node.id)
+    fetchNodes(node.id, 1)
   }
 
   // ======================

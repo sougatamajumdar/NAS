@@ -15,25 +15,33 @@ export default function UploadBox({
   compact = false
 }) {
 
-  const {
-    uploadFile,
-    currentFolder,
-    validateDiskOperation,
-  } = useFileStore()
+  const uploadFile =
+    useFileStore(
+      (state) => state.uploadFile
+    )
+
+  const currentFolder =
+    useFileStore(
+      (state) => state.currentFolder
+    )
+
+  const validateDiskOperation =
+    useFileStore(
+      (state) =>
+        state.validateDiskOperation
+    )
+  const get = useFileStore.getState
 
   const onDrop = async (
     acceptedFiles
   ) => {
-
     const validation =
       await validateDiskOperation({
-
-        node: {
-          disk_path:
-            currentFolder?.disk_path
-        },
-
         operation: "upload",
+        fileSize: acceptedFiles.reduce(
+          (sum, file) => sum + file.size,
+          0
+        )
       })
 
     if (!validation.valid) {
@@ -45,16 +53,13 @@ export default function UploadBox({
       return
     }
 
-    await Promise.all(
+    for (const file of acceptedFiles) {
 
-      acceptedFiles.map((file) =>
-
-        uploadFile(
-          file,
-          currentFolder
-        )
+      get().uploadFile(
+        file,
+        currentFolder
       )
-    )
+    }
   }
 
   const {
@@ -65,7 +70,7 @@ export default function UploadBox({
     onDrop,
     multiple: true
   })
-
+  
   // COMPACT MODE
   if (compact) {
 

@@ -1,9 +1,13 @@
 import {
   Card
 } from "@/components/ui/card"
+import Pagination from "../common/Pagination.jsx"
 
 export default function BackupTable({
-  backups
+  backups,
+  count,
+  currentPage,
+  onPageChange,
 }) {
 
   return (
@@ -28,11 +32,22 @@ export default function BackupTable({
       </div>
 
       <div className="space-y-4">
-
+        {backups.length === 0 && (
+          <div
+            className="
+              py-10
+              text-center
+              text-muted-foreground
+            "
+          >
+            No backups available
+          </div>
+        )}
         {backups.map((backup) => (
 
           <div
-            key={backup.id}
+            key={  backup.id ||
+                   backup.backup_file}
             className="
                       rounded-2xl
                       border
@@ -70,7 +85,13 @@ export default function BackupTable({
         ))}
 
       </div>
-
+      <Pagination
+        currentPage={currentPage}
+        totalPages={
+          Math.ceil(count / 10)
+        }
+        onPageChange={onPageChange}
+      />
     </Card>
   )
 }

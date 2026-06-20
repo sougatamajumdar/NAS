@@ -5,9 +5,7 @@ import {
 } from "react"
 
 import {
-  Plus,
   RefreshCw,
-  Database,
   UserPlus
 } from "lucide-react"
 
@@ -18,11 +16,12 @@ import {
 import {
   useAdminStore
 } from "@/store/adminStore"
-import { useFileStore } from "@/store/fileStore"
+// import { useFileStore } from "@/store/fileStore"
 import AdminStats from "@/components/admin/AdminStats"
 import UsersTable from "@/components/admin/UsersTable"
 import DiskTable from "@/components/admin/DiskTable"
 import BackupTable from "@/components/admin/BackupTable"
+import { toast } from "sonner"
 
 export default function AdminDashboard() {
 
@@ -31,29 +30,52 @@ export default function AdminDashboard() {
     users,
     disks,
     backups,
+
+    dashboardStats,
+
     scannedDisks,
+
+    // fetchDashboardStats,
 
     loading,
 
     fetchAdminData,
     scanDisks,
+    disksCount,
+    scanLoading,
 
     deleteUser,
     updateUser,
+    usersCount,
 
     disableDisk,
     deleteDisk,
 
+    fetchUsersByPage,
+    fetchDisksByPage,
+    fetchBackupsByPage,
+
+    backupsCount,
+
     createDisk,
     createUser,
 
-    createBackup,
+    // createBackup,
+
+    actionLoading,
 
   } = useAdminStore()
+  const [usersPage, setUsersPage] =
+  useState(1)
 
-  const fetchDiskStatus = useFileStore(
-    (state) => state.fetchDiskStatus
-  )
+  const [disksPage, setDisksPage] =
+    useState(1)
+
+  const [backupsPage, setBackupsPage] =
+    useState(1)
+  // const fetchDiskStatus = useFileStore(
+  //   (state) => state.fetchDiskStatus
+  // )
 
   const [userForm, setUserForm] = useState({
     username: "",
@@ -68,20 +90,59 @@ export default function AdminDashboard() {
 
   useEffect(() => {
 
-    if (initializedRef.current) return
+    if (initializedRef.current)
+      return
 
-    initializedRef.current = true
+    initializedRef.current =
+      true
 
-    fetchAdminData()
-    scanDisks()
-    // fetchDiskStatus()
+    Promise.all([
+
+      fetchAdminData(),
+      // fetchDashboardStats(),
+      scanDisks()
+
+    ])
 
   }, [])
+
+  // useEffect(() => {
+
+  //   const timer =
+  //     setInterval(() => {
+
+  //       fetchAdminData()
+
+  //     }, 30000)
+
+  //   return () =>
+  //     clearInterval(timer)
+
+  // }, [])
 
   const handleCreateUser = async (e) => {
 
     e.preventDefault()
+    if (
+        !userForm.username.trim() ||
+        !userForm.email.trim() ||
+        !userForm.password.trim()
+        ) {
 
+      toast.error(
+        "All fields are required"
+      )
+
+      return
+    }
+    if (userForm.password.length < 8) {
+
+      toast.error(
+        "Password must be at least 8 characters"
+      )
+
+      return
+    }
     const result = await createUser(userForm)
 
     if (result.success) {
@@ -177,7 +238,17 @@ export default function AdminDashboard() {
       </div>
 
       <button
-        onClick={fetchAdminData}
+        disabled={loading || scanLoading}
+        onClick={async () => {
+
+        await Promise.all([
+          fetchUsersByPage(usersPage),
+          fetchDisksByPage(disksPage),
+          fetchBackupsByPage(backupsPage),
+          // fetchDashboardStats(),
+          fetchAdminData(),
+          scanDisks(),
+        ])}}
         className="
           h-12
           px-5
@@ -195,9 +266,14 @@ export default function AdminDashboard() {
         "
       >
 
-        <RefreshCw size={18} />
+        <RefreshCw size={18} className={
+          loading || scanLoading
+            ? "animate-spin"
+            : ""}/>
 
-        Refresh Data
+        {loading || scanLoading
+        ? "Refreshing..."
+        : "Refresh Data"}
 
       </button>
 
@@ -205,8 +281,7 @@ export default function AdminDashboard() {
 
     {/* STATS */}
     <AdminStats
-      users={users}
-      disks={disks}
+      stats={dashboardStats}
     />
 
     {/* MAIN GRID */}
@@ -222,14 +297,32 @@ export default function AdminDashboard() {
       {/* LEFT */}
       <div className="space-y-6 min-w-0">
 
-        <DiskTable
-          disks={disks}
-          onDisable={disableDisk}
-          onDelete={deleteDisk}
-        />
+      <DiskTable
+        disks={disks}
+        count={disksCount}
+        currentPage={disksPage}
+        onPageChange={(page) => {
+
+          setDisksPage(page)
+
+          fetchDisksByPage(page)
+
+        }}
+        onDisable={disableDisk}
+        onDelete={deleteDisk}
+      />
 
         <UsersTable
           users={users}
+          count={usersCount}
+          currentPage={usersPage}
+          onPageChange={(page) => {
+
+            setUsersPage(page)
+
+            fetchUsersByPage(page)
+
+          }}
           onDelete={deleteUser}
           onToggleAdmin={(user) =>
             updateUser(user.id, {
@@ -238,7 +331,18 @@ export default function AdminDashboard() {
           }
         />
 
-        <BackupTable backups={backups} />
+        <BackupTable
+          backups={backups}
+          count={backupsCount}
+          currentPage={backupsPage}
+          onPageChange={(page) => {
+
+            setBackupsPage(page)
+
+            fetchBackupsByPage(page)
+
+          }}
+        />
 
       </div>
 
@@ -295,6 +399,7 @@ export default function AdminDashboard() {
             <input
               type="text"
               placeholder="Username"
+              disabled={actionLoading}
               value={userForm.username}
               onChange={(e) =>
                 setUserForm({
@@ -318,6 +423,7 @@ export default function AdminDashboard() {
             <input
               type="email"
               placeholder="Email"
+              disabled={actionLoading}
               value={userForm.email}
               onChange={(e) =>
                 setUserForm({
@@ -341,6 +447,7 @@ export default function AdminDashboard() {
             <input
               type="password"
               placeholder="Password"
+              disabled={actionLoading}
               value={userForm.password}
               onChange={(e) =>
                 setUserForm({
@@ -374,6 +481,7 @@ export default function AdminDashboard() {
               <input
                 type="checkbox"
                 checked={userForm.is_staff}
+                disabled={actionLoading}
                 onChange={(e) =>
                   setUserForm({
                     ...userForm,
@@ -397,8 +505,13 @@ export default function AdminDashboard() {
                 hover:opacity-90
                 transition
               "
+              disabled={actionLoading}
             >
-              Create User
+              {
+                actionLoading
+                  ? "Creating..."
+                  : "Create User"
+              }
             </button>
 
           </form>
@@ -431,6 +544,7 @@ export default function AdminDashboard() {
 
             <button
               onClick={scanDisks}
+              disabled={scanLoading}
               className="
                 h-10
                 px-4
@@ -441,12 +555,29 @@ export default function AdminDashboard() {
                 hover:bg-white/10
               "
             >
-              Scan
+                {scanLoading
+                ? "Scanning..."
+                : "Scan"}
             </button>
 
           </div>
 
           <div className="space-y-4">
+
+            {!scanLoading &&
+            scannedDisks.length === 0 && (
+
+              <div
+                className="
+                  text-center
+                  py-10
+                  text-muted-foreground
+                "
+              >
+                No disks detected
+              </div>
+
+            )}
 
             {scannedDisks.map((disk, index) => {
 
@@ -459,7 +590,7 @@ export default function AdminDashboard() {
               return (
 
                 <div
-                  key={index}
+                  key={disk.mount_path}
                   className="
                     rounded-2xl
                     border

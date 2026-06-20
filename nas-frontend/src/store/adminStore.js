@@ -7,12 +7,32 @@ import { toast } from "sonner"
 export const useAdminStore = create((set, get) => ({
 
   users: [],
+  usersCount: 0,
+  usersNext: null,
+  usersPrevious: null,
+
   disks: [],
+  disksCount: 0,
+  disksNext: null,
+  disksPrevious: null,
+
   backups: [],
+  backupsCount: 0,
+  backupsNext: null,
+  backupsPrevious: null,
   scannedDisks: [],
 
+  dashboardStats: {
+    users: 0,
+    files: 0,
+    folders: 0,
+    active_disks: 0,
+  },
+
   loading: false,
+  scanLoading: false,
   actionLoading: false,
+  processingDiskId:null,
 
   // ======================
   // FETCH ALL
@@ -24,21 +44,71 @@ export const useAdminStore = create((set, get) => ({
     try {
 
       const [
+        statsRes,
         usersRes,
         disksRes,
         backupsRes
       ] = await Promise.all([
 
-        api.get("/admin/users/"),
-        api.get("/admin/disks/"),
-        api.get("/admin/backups/")
+        api.get(
+          "/admin/dashboard/stats/"
+        ),
+
+        api.get(
+          "/admin/users/"
+        ),
+
+        api.get(
+          "/admin/disks/"
+        ),
+
+        api.get(
+          "/admin/backups/"
+        )
       ])
+
       console.log("disksRes", disksRes)  // Debugging line
 
       set({
-        users: usersRes.data,
-        disks: disksRes.data,
-        backups: backupsRes.data,
+        dashboardStats:
+          statsRes.data,
+
+        users:
+          usersRes.data.results || [],
+
+        usersCount:
+          usersRes.data.count || 0,
+
+        usersNext:
+          usersRes.data.next,
+
+        usersPrevious:
+          usersRes.data.previous,
+
+        disks:
+          disksRes.data.results || [],
+
+        disksCount:
+          disksRes.data.count || 0,
+
+        disksNext:
+          disksRes.data.next,
+
+        disksPrevious:
+          disksRes.data.previous,
+
+        backups:
+          backupsRes.data.results || [],
+
+        backupsCount:
+          backupsRes.data.count || 0,
+
+        backupsNext:
+          backupsRes.data.next,
+
+        backupsPrevious:
+          backupsRes.data.previous,
+
         loading: false,
       })
 
@@ -57,11 +127,16 @@ export const useAdminStore = create((set, get) => ({
   // ======================
   scanDisks: async () => {
 
+    set({
+      scanLoading: true
+    })
+
     try {
 
-      const response = await api.get(
-        "/admin/disks/scan/"
-      )
+      const response =
+        await api.get(
+          "/admin/disks/scan/"
+        )
 
       set({
         scannedDisks: response.data
@@ -69,9 +144,15 @@ export const useAdminStore = create((set, get) => ({
 
     } catch (error) {
 
-      console.error(error)
+      toast.error(
+        "Failed to scan disks"
+      )
 
-      toast.error("Failed to scan disks")
+    } finally {
+
+      set({
+        scanLoading: false
+      })
     }
   },
 
@@ -93,20 +174,29 @@ export const useAdminStore = create((set, get) => ({
 
       await get().fetchAdminData()
 
-      set({ actionLoading: false })
-
       return {
         success: true
       }
 
     } catch (error) {
 
-      set({ actionLoading: false })
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        "Failed to create user"
+
+      toast.error(message)
 
       return {
-        success: false,
-        error: error.response?.data
+        success:false,
+        error:error.response?.data
       }
+
+    } finally {
+
+      set({
+        actionLoading: false
+      })
     }
   },
 
@@ -177,11 +267,12 @@ export const useAdminStore = create((set, get) => ({
 
       toast.success("Disk added")
 
-      await get().fetchAdminData()
+      await Promise.all([
+        get().fetchAdminData(),
+        get().scanDisks()
+      ])
 
-      return {
-        success: true
-      }
+      return { success: true }
 
     } catch (error) {
 
@@ -264,5 +355,158 @@ export const useAdminStore = create((set, get) => ({
       toast.error("Backup failed")
     }
   },
+  fetchDashboardStats: async () => {
 
+  try {
+
+    const response =
+      await api.get(
+        "/admin/dashboard/stats/"
+      )
+
+    set({
+      dashboardStats:
+        response.data
+    })
+
+  } catch (error) {
+
+    console.error(error)
+  }
+},
+
+fetchUsersPage: async (url) => {
+
+  try {
+
+    const response =
+      await api.get(url)
+
+    set({
+      users:
+        response.data.results || [],
+
+      usersCount:
+        response.data.count || 0,
+
+      usersNext:
+        response.data.next,
+
+      usersPrevious:
+        response.data.previous,
+    })
+
+  } catch (error) {
+
+    console.error(error)
+  }
+},
+fetchDisksPage: async (url) => {
+
+  try {
+
+    const response =
+      await api.get(url)
+
+    set({
+      disks:
+        response.data.results || [],
+
+      disksCount:
+        response.data.count || 0,
+
+      disksNext:
+        response.data.next,
+
+      disksPrevious:
+        response.data.previous,
+    })
+
+  } catch (error) {
+
+    console.error(error)
+  }
+},
+fetchBackupsPage: async (url) => {
+
+  try {
+
+    const response =
+      await api.get(url)
+
+    set({
+      backups:
+        response.data.results || [],
+
+      backupsCount:
+        response.data.count || 0,
+
+      backupsNext:
+        response.data.next,
+
+      backupsPrevious:
+        response.data.previous,
+    })
+
+  } catch (error) {
+
+    console.error(error)
+  }
+},
+fetchUsersByPage: async (page) => {
+
+  const response =
+    await api.get(
+      `/admin/users/?page=${page}`
+    )
+
+  set({
+    users:
+      response.data.results,
+
+    usersCount:
+      response.data.count,
+
+    usersNext:
+      response.data.next,
+
+    usersPrevious:
+      response.data.previous,
+  })
+},
+fetchDisksByPage: async (page) => {
+
+  const response =
+    await api.get(
+      `/admin/disks/?page=${page}`
+    )
+
+set({
+  disks: response.data.results,
+  disksCount: response.data.count,
+  disksNext: response.data.next,
+  disksPrevious: response.data.previous,
+})
+},
+fetchBackupsByPage: async (page) => {
+
+  const response =
+    await api.get(
+      `/admin/backups/?page=${page}`
+    )
+
+  set({
+    backups:
+      response.data.results,
+
+    backupsCount:
+      response.data.count,
+
+    backupsNext:
+      response.data.next,
+
+    backupsPrevious:
+      response.data.previous,
+  })
+},
 }))

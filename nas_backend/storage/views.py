@@ -1,3 +1,4 @@
+import hashlib
 import mimetypes
 import os
 from PIL import Image
@@ -6,12 +7,17 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import BackupRecord, Node, Share, StorageDisk, UserStorageMapping
-from .serializers import ( AdminCreateUserSerializer, AdminUserListSerializer, BackupCreateSerializer, CreateFolderSerializer, FileUploadSerializer, LoginSerializer, 
+from rest_framework.parsers import MultiPartParser
+
+from .pagination import StandardResultsPagination
+from .permissions import ensure_owner
+from .utils.file import generate_thumbnail, is_image, get_mime_type
+from .models import BackupRecord, Node, Share, StorageDisk, UploadSession, UserStorageMapping
+from .serializers import ( AdminCreateUserSerializer, AdminUserListSerializer, BackupCreateSerializer, CreateFolderSerializer, FileUploadSerializer, InitiateUploadSerializer, LoginSerializer, 
                           NodeListSerializer, ShareSerializer, SharedNodeSerializer, 
                           StorageDiskSerializer, StorageDiskListSerializer )
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
-from .services import create_disk_backup, create_user_backup, delete_user_and_data, get_available_disk, delete_node_recursive, get_user_disk_status, is_disk_empty, refresh_disk_usage
+from .services import create_disk_backup, create_user_backup, delete_user_and_data, get_available_disk, delete_node_recursive, get_user_disk_status, is_descendant, is_disk_empty, refresh_disk_usage
 from django.http import FileResponse, Http404
 from rest_framework.decorators import api_view, permission_classes
 from django.contrib.auth import (
@@ -26,89 +32,53 @@ import shutil
 from collections import defaultdict
 from mongoengine.queryset.visitor import Q
 from io import BytesIO
+from pathlib import Path
 
 
 User = get_user_model()
 
-class FileThumbnailView(APIView):
+from .mixins import (
+    ResponseMixin,
+    NodeMixin,
+    UploadSessionMixin
+)
+
+
+class BaseAPIView(
+    APIView,
+    ResponseMixin,
+    NodeMixin,
+    UploadSessionMixin
+):
+    pass
+
+class FileThumbnailView(BaseAPIView):
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request, file_id):
 
-        try:
-
-            node = Node.objects.get(
-                id=file_id,
-                type="FILE"
-            )
-
-        except Node.DoesNotExist:
-
-            raise Http404("File not found")
-
-        # PERMISSION CHECK
-        is_owner = (
-            node.owner_id == request.user.id
+        node = self.get_node(
+            file_id,
+            node_type="FILE"
         )
 
-        is_shared = Share.objects.filter(
-            node=node,
-            shared_with_id=request.user.id
-        ).first()
-
-        if not is_owner and not is_shared:
-
-            return Response(
-                {"error": "Access denied"},
-                status=403
+        if not self.check_node_access(
+            node,
+            request.user
+        ):
+            return self.error(
+                "Access denied",
+                403
             )
 
         if not os.path.exists(node.file_path):
+            raise Http404("File missing")
 
-            raise Http404("Missing file")
-
-        mime, _ = mimetypes.guess_type(
-            node.name
-        )
-
-        if not mime or not mime.startswith("image/"):
-
+        if not is_image(node.name):
             raise Http404("Not image")
 
-        try:
-
-            image = Image.open(node.file_path)
-
-            image.thumbnail((400, 400))
-
-            buffer = BytesIO() 
-
-            image.save(
-                buffer,
-                format="WEBP",
-                quality=70
-            )
-
-            buffer.seek(0)
-
-            response = FileResponse(
-                buffer,
-                content_type="image/webp"
-            )
-
-            # CACHE
-            response["Cache-Control"] = (
-                "public, max-age=86400"
-            )
-
-            return response
-
-        except Exception as e:
-
-            print(e)
-
-            raise Http404("Thumbnail failed")
+        return generate_thumbnail(node.file_path) 
 
 class NodeView(APIView):
     permission_classes = [IsAuthenticated]
@@ -143,15 +113,23 @@ class NodeView(APIView):
             query["parent"] = None
 
         nodes = Node.objects.filter(**query).order_by("-created_at")
+
+        paginator = StandardResultsPagination()
+
+        page = paginator.paginate_queryset(
+            nodes,
+            request
+        )
+
         serializer = NodeListSerializer(
-                                            nodes,
-                                            many=True,
-                                            context={
-                                                "request": request
-                                            }
-                                        )
-        print('serializer->', serializer.data)  # Debugging line to check serialized data
-        return Response(serializer.data)
+            page,
+            many=True,
+            context={"request": request}
+        )
+
+        return paginator.get_paginated_response(
+            serializer.data
+        )
 
     def post(self, request):
         serializer = CreateFolderSerializer(data=request.data, context={"request": request})
@@ -181,19 +159,15 @@ class FileUploadView(APIView):
 
     def post(self, request):
         serializer = FileUploadSerializer(data=request.data, context={"request": request})
-        print("FileUploadView POST data:", request.data)  # Debugging line
         if not serializer.is_valid():
-            print("FileUploadView errors:", serializer.errors)  # Debugging line
             return Response(serializer.errors, status=400)
 
         file = serializer.validated_data["file"]
         parent = serializer.validated_data["parent"]
-        print(f"Uploading file: {file.name}, size: {file.size} bytes")  # Debugging line
 
         try:
             print(1)
             disk = get_available_disk(request.user.id, file.size)
-            print(f"Selected disk: {disk.name} with mount path {disk.mount_path}")  # Debugging line
             usage = shutil.disk_usage(disk.mount_path)
 
             if file.size > usage.free:
@@ -213,6 +187,13 @@ class FileUploadView(APIView):
             user_id=request.user.id,
             disk=disk
         ).order_by("-created_at").first()
+        if not mapping:
+            return Response(
+                {
+                    "error": "User storage mapping not found"
+                },
+                status=400
+            )
 
         storage_path = mapping.storage_path
 
@@ -272,62 +253,481 @@ class FileUploadView(APIView):
         }, status=status.HTTP_201_CREATED)
     
 
-class FileDownloadView(APIView):
+# chunck upload view implement 
+class InitiateUploadView(APIView):
+
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, file_id):
-        try:
-            node = Node.objects.get(id=file_id, type="FILE")
-            print(f"Found node: {node.name} at path {node.file_path}")  # Debugging line
-        except Node.DoesNotExist:
-            raise Http404("File not found")
+    def post(self, request):
 
-        #  Block folder download
-        if node.type != "FILE":
-            return Response({"error": "Not a file"}, status=400)
+        serializer = InitiateUploadSerializer(
+            data=request.data,
+            context={"request": request}
+        )
 
-        # Permission check
-        is_owner = node.owner_id == request.user.id
+        serializer.is_valid(
+            raise_exception=True
+        )
 
-        is_shared = Share.objects.filter(
-            node=node,
-            shared_with_id=request.user.id
+        data = serializer.validated_data
+
+        disk = get_available_disk(
+            request.user.id,
+            data["total_size"]
+        )
+
+        upload_id = str(uuid.uuid4())
+
+        temp_path = os.path.join(
+            disk.mount_path,
+            "temp_uploads",
+            upload_id
+        )
+
+        os.makedirs(temp_path, exist_ok=True)
+
+        parent = None
+
+        if data.get("parent_id"):
+
+            parent = Node.objects.get(
+                id=data["parent_id"],
+                owner_id=request.user.id
+            )
+
+
+        # existing = Node.objects.filter(
+        #     owner_id=request.user.id,
+        #     name=data["filename"],
+        #     parent=parent,
+        #     type="FILE"
+        # ).first()  
+        existing = Node.objects.filter(
+            owner_id=request.user.id,
+            parent=parent,
+            type="FILE",
+            name__iexact=data["filename"]
         ).first()
+        if existing:
+            return Response(
+                {
+                    "error": "File already exists"
+                },
+                status=400
+            )
+        session = UploadSession(
+            upload_id=upload_id,
+            owner_id=request.user.id,
+            filename=data["filename"],
+            total_size=data["total_size"],
+            total_chunks=data["total_chunks"],
+            chunk_size=data["chunk_size"],
+            parent=parent,
+            disk=disk,
+            temp_path=temp_path,
+            file_hash=data["file_hash"]
+        )
+
+        session.save()
+
+        return Response({
+            "upload_id": upload_id,
+            "chunk_size": data["chunk_size"],
+            "uploaded_chunks": [],
+        })
     
-        if not is_owner and not is_shared:
-            return Response({"error": "Access denied"}, status=403)
+class UploadChunkView(BaseAPIView):
 
-        # File existence check
-        if not os.path.exists(node.file_path):
-            raise Http404("File missing on disk")
+    permission_classes = [IsAuthenticated]
 
-        # Stream file
-        response = FileResponse(
-            open(node.file_path, 'rb'),
+    parser_classes = [MultiPartParser]  
+
+    def post(self, request):
+
+        upload_id = request.data.get("upload_id")
+
+        if not upload_id:
+            return Response(
+                {"error": "upload_id required"},
+                status=400
+            )
+
+        try:
+            chunk_index = int(
+                request.data.get("chunk_index")
+            )
+        except:
+            return Response(
+                {"error": "Invalid chunk index"},
+                status=400
+            )
+
+        chunk = request.FILES.get("chunk")
+
+        if not chunk:
+            return Response(
+                {"error": "Chunk file required"},
+                status=400
+            )
+
+        try:
+            session = self.get_upload_session( 
+                upload_id,
+                request.user.id
+            )
+            if (
+                chunk_index < 0
+                or
+                chunk_index >= session.total_chunks
+            ):
+                return Response(
+                    {"error": "Invalid chunk index"},
+                    status=400
+                )
+
+        except UploadSession.DoesNotExist:
+
+            return Response({
+                "error": "Upload session not found"
+            }, status=404)
+
+        chunk_path = os.path.join(
+            session.temp_path,
+            f"{chunk_index}.part"
+        )
+
+        if os.path.exists(chunk_path):
+
+            return Response({
+                "message": "Chunk already uploaded",
+                "chunk_index": chunk_index
+            }, status=200)
+
+        with open(chunk_path, "wb+") as f:
+
+            for c in chunk.chunks():
+
+                f.write(c)
+
+        if chunk_index not in session.uploaded_chunks:
+
+            session.uploaded_chunks.append(
+                chunk_index
+            )
+
+            session.save()
+
+        return Response({
+            "message": "Chunk uploaded",
+            "chunk_index": chunk_index
+        })
+    
+def calculate_file_hash(file_path):
+
+    sha256 = hashlib.sha256()
+
+    with open(file_path, "rb") as f:
+
+        for chunk in iter(
+            lambda: f.read(4096),
+            b""
+        ):
+            sha256.update(chunk)
+
+    return sha256.hexdigest()
+
+class CompleteUploadView(BaseAPIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+
+        upload_id = request.data.get(
+            "upload_id"
+        )
+
+        try:
+
+            session = self.get_upload_session(
+                upload_id,
+                request.user.id
+            )
+
+        except UploadSession.DoesNotExist:
+
+            return Response({
+                "error": "Upload not found"
+            }, status=404)
+
+        if len(session.uploaded_chunks) != session.total_chunks:
+
+            return Response({
+                "error": "Missing chunks"
+            }, status=400)
+
+        ext = os.path.splitext(
+            session.filename
+        )[1]
+
+        unique_name = f"{uuid.uuid4()}{ext}"
+
+        mapping = UserStorageMapping.objects.filter(
+            user_id=request.user.id,
+            disk=session.disk
+        ).first()
+        
+        if not mapping:
+            return Response(
+                {
+                    "error": "Storage mapping not found"
+                },
+                status=400
+            )
+        
+        final_path = os.path.join(
+            mapping.storage_path,
+            unique_name
+        )
+
+        os.makedirs(
+            mapping.storage_path,
+            exist_ok=True
+        )
+        usage = shutil.disk_usage(
+            session.disk.mount_path
+        )
+
+        if usage.free < session.total_size:
+            return Response(
+                {"error": "Not enough disk space"},
+                status=400
+            )
+        try: 
+            with open(final_path, "wb") as final_file:
+                missing = []
+                
+                for i in range(session.total_chunks):
+
+                    chunk_path = os.path.join(
+                        session.temp_path,
+                        f"{i}.part"
+                    )
+
+                    if not os.path.exists(chunk_path):
+                        missing.append(i)
+                        continue
+
+                    with open(chunk_path, "rb") as chunk_file:
+                        shutil.copyfileobj(
+                            chunk_file,
+                            final_file
+                        )
+            if missing:
+
+                if os.path.exists(final_path):
+                    os.remove(final_path)
+
+                return Response(
+                    {
+                        "error": "Missing chunks",
+                        "missing": missing
+                    },
+                    status=400
+                )
+
+        except Exception as e:
+
+            if os.path.exists(final_path):
+                os.remove(final_path)
+
+            return Response(
+                {
+                    "error": str(e)
+                },
+                status=500
+            )
+        if session.is_completed:
+            return Response({
+                "message": "Already completed"
+            }, status=200)
+            
+        uploaded_hash = calculate_file_hash(
+            final_path
+        )
+
+        if uploaded_hash != session.file_hash:
+
+            os.remove(final_path)
+
+            return Response({
+                "error": "File integrity check failed"
+            }, status=400)
+
+        node = Node(
+            name=session.filename,
+            type="FILE",
+            owner_id=request.user.id,
+            parent=session.parent,
+            disk=session.disk,
+            file_path=final_path,
+            size=session.total_size,
+            file_hash=session.file_hash
+        )
+
+        node.save()
+
+        shutil.rmtree(
+            session.temp_path,
+            ignore_errors=True
+        )
+
+        session.delete()
+
+        refresh_disk_usage(session.disk)
+
+        return Response({
+            "message": "Upload completed",
+            "node_id": str(node.id)
+        })
+    
+ 
+class UploadStatusView(BaseAPIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, upload_id):
+
+        try:
+            session = self.get_upload_session(
+                upload_id,
+                request.user.id
+            )
+
+        except UploadSession.DoesNotExist:
+
+            return Response(
+                {"error": "Upload not found"},
+                status=404
+            )
+
+        return Response({
+            "upload_id": session.upload_id,
+            "filename": session.filename,
+            "total_chunks": session.total_chunks,
+            "uploaded_chunks": session.uploaded_chunks,
+            "uploaded_count": len(session.uploaded_chunks),
+            "is_completed": session.is_completed,
+        })
+
+class CancelUploadView(BaseAPIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, upload_id):
+
+        try:
+
+            session = self.get_upload_session(
+                upload_id,
+                request.user.id
+            )
+
+        except UploadSession.DoesNotExist:
+
+            return Response(
+                {"error": "Upload not found"},
+                status=404
+            )
+
+        shutil.rmtree(
+            session.temp_path,
+            ignore_errors=True
+        )
+
+        session.delete()
+
+        return Response({
+            "message": "Upload cancelled"
+        }) 
+    
+# chuck upload views end 
+
+class FileDownloadView(
+    BaseAPIView
+):
+
+    permission_classes = [
+        IsAuthenticated
+    ]
+
+    def get(
+        self,
+        request,
+        file_id
+    ):
+
+        node = self.get_node(
+            file_id,
+            node_type="FILE"
+        )
+
+        if not self.check_node_access(
+            node,
+            request.user
+        ):
+            return self.error(
+                "Access denied",
+                403
+            )
+
+        if not os.path.exists(
+            node.file_path
+        ):
+            raise Http404(
+                "File missing"
+            )
+
+        file_handle = open(node.file_path, "rb")
+
+        return FileResponse(
+            file_handle,
             as_attachment=True,
             filename=node.name
         )
-
-        return response
     
 
-class DeleteNodeView(APIView):
-    permission_classes = [IsAuthenticated]
+class DeleteNodeView(
+    BaseAPIView
+):
 
-    def delete(self, request, node_id):
-        try:
-            node = Node.objects.get(id=node_id)
-        except Node.DoesNotExist:
-            return Response({"error": "Node not found"}, status=404)
+    permission_classes = [
+        IsAuthenticated
+    ]
 
-        # Only owner can delete
-        if node.owner_id != request.user.id:
-            return Response({"error": "Permission denied"}, status=403)
+    def delete(
+        self,
+        request,
+        node_id
+    ):
 
-        # delete logic
-        delete_node_recursive(node)
+        node = self.get_node(
+            node_id
+        )
 
-        return Response({"message": "Deleted successfully"}, status=200)
+        ensure_owner( 
+            node,
+            request.user
+        )
+
+        delete_node_recursive(
+            node
+        )
+
+        return self.success(
+            {
+                "message":
+                "Deleted successfully"
+            }
+        )
     
 
 class ShareNodeView(APIView):
@@ -364,9 +764,21 @@ class SharedWithMeView(APIView):
             shared_with_id=request.user.id
         ).order_by("-created_at")
 
-        serializer = SharedNodeSerializer(shares, many=True)
+        paginator = StandardResultsPagination()
 
-        return Response(serializer.data)
+        page = paginator.paginate_queryset(
+            shares,
+            request
+        )
+
+        serializer = SharedNodeSerializer(
+            page,
+            many=True
+        )
+
+        return paginator.get_paginated_response(
+            serializer.data
+        )
     
 class ScanDisksView(APIView):
 
@@ -385,6 +797,9 @@ class ScanDisksView(APIView):
             "/Volumes/Preboot",
             "/Volumes/Update",
             "/Volumes/VM",
+            "/proc",
+            "/sys",
+            "/run"
         ]
 
         for partition in partitions:
@@ -430,8 +845,22 @@ class StorageDiskView(APIView):
 
     def get(self, request):
         disks = StorageDisk.objects.all().order_by("-created_at")
-        serializer = StorageDiskListSerializer(disks, many=True)
-        return Response(serializer.data)
+
+        paginator = StandardResultsPagination()
+
+        page = paginator.paginate_queryset(
+            disks,
+            request
+        )
+
+        serializer = StorageDiskListSerializer(
+            page,
+            many=True
+        )
+
+        return paginator.get_paginated_response(
+            serializer.data
+        )
 
     def post(self, request):
         serializer = StorageDiskSerializer(
@@ -495,37 +924,144 @@ def disable_disk(request, disk_id):
     return Response({"message": "Disk disabled"})
 
 
-@api_view(['DELETE'])
+@api_view(["DELETE"])
 @permission_classes([IsAdminUser])
 def delete_disk(request, disk_id):
+
     try:
-        disk = StorageDisk.objects.get(id=disk_id)
+        disk = StorageDisk.objects.get(
+            id=disk_id
+        )
+
     except StorageDisk.DoesNotExist:
-        return Response({"error": "Disk not found"}, status=404)
 
-    # 🔥 Safety check
-    if not is_disk_empty(disk):
-        return Response({
-            "error": "Disk is not empty. Cannot delete."
-        }, status=400)
+        return Response(
+            {"error": "Disk not found"},
+            status=404
+        )
 
-    # disk.delete()
-    disk.is_active = False
-    disk.save()
+    disk_exists = Path(
+        disk.mount_path
+    ).exists()
 
-    return Response({"message": "Disk deleted"})
+    node_count = Node.objects(
+        disk=disk
+    ).count()
+
+    mapping_count = UserStorageMapping.objects(
+        disk=disk
+    ).count()
+
+    upload_count = UploadSession.objects(
+        disk=disk,
+        is_completed=False
+    ).count()
+
+    backup_count = BackupRecord.objects(
+        disk=disk
+    ).count()
+
+    # -------------------------
+    # DISK STILL EXISTS
+    # -------------------------
+
+    if disk_exists:
+
+        blockers = []
+
+        if node_count:
+            blockers.append(
+                f"{node_count} nodes"
+            )
+
+        if mapping_count:
+            blockers.append(
+                f"{mapping_count} user mappings"
+            )
+
+        if upload_count:
+            blockers.append(
+                f"{upload_count} active uploads"
+            )
+
+        if backup_count:
+            blockers.append(
+                f"{backup_count} backup records"
+            )
+
+        if blockers:
+
+            return Response(
+                {
+                    "error":
+                    "Disk still contains NAS data.",
+                    "details":
+                    blockers
+                },
+                status=400
+            )
+
+        disk.delete()
+
+        return Response(
+            {
+                "message":
+                "Disk deleted successfully."
+            }
+        )
+
+    # -------------------------
+    # DISK MISSING
+    # CLEAN DATABASE
+    # -------------------------
+
+    UserStorageMapping.objects(
+        disk=disk
+    ).delete()
+
+    UploadSession.objects(
+        disk=disk
+    ).delete()
+
+    BackupRecord.objects(
+        disk=disk
+    ).delete()
+
+    Node.objects(
+        disk=disk
+    ).delete()
+
+    disk.delete()
+
+    return Response(
+        {
+            "message":
+            "Missing disk and all related metadata removed successfully."
+        }
+    )
 
 
 class AdminUserView(APIView):
-    print("AdminUserView initialized")  # Debugging line
     permission_classes = [IsAdminUser]
 
     def get(self, request):
         users = User.objects.all().order_by("-date_joined")
 
-        serializer = AdminUserListSerializer(users, many=True)
+        paginator = StandardResultsPagination()
 
-        return Response(serializer.data)
+        page = paginator.paginate_queryset(
+            users,
+            request
+        )
+
+        serializer = AdminUserListSerializer(
+            page,
+            many=True
+        )
+
+        return paginator.get_paginated_response(
+            serializer.data
+        )
 
     def post(self, request):
         print("AdminUserView POST data:", request.data)  # Debugging line
@@ -614,13 +1150,20 @@ class BackupView(APIView):
     # LIST BACKUPS
     def get(self, request):
 
-        backups = BackupRecord.objects.order_by(
+        backups = BackupRecord.objects.all().order_by(
             "-created_at"
-        ).all()
+        )
+
+        paginator = StandardResultsPagination()
+
+        page = paginator.paginate_queryset(
+            backups,
+            request
+        )
 
         data = []
 
-        for backup in backups:
+        for backup in page:
 
             data.append({
                 "id": str(backup.id),
@@ -631,7 +1174,7 @@ class BackupView(APIView):
                 "created_at": backup.created_at
             })
 
-        return Response(data)
+        return paginator.get_paginated_response(data)
 
     # CREATE BACKUP
     def post(self, request):
@@ -727,7 +1270,8 @@ class LoginView(APIView):
                 "username": user.username,
                 "email": user.email,
                 "is_staff": user.is_staff,
-                "is_superuser": user.is_superuser
+                "is_superuser": user.is_superuser,
+                "is_active": user.is_active
             }
         })
 
@@ -760,7 +1304,8 @@ class MeView(APIView):
             "username": user.username,
             "email": user.email,
             "is_staff": user.is_staff,
-            "is_superuser": user.is_superuser
+            "is_superuser": user.is_superuser,
+            "is_active": user.is_active
         })
     
 
@@ -882,65 +1427,49 @@ class SearchNodeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+            query = request.query_params.get("q", "").strip()
+            node_type = request.query_params.get("type", None)
+            parent_id = request.query_params.get("parent_id", None)
 
-        query = request.query_params.get(
-            "q",
-            ""
-        ).strip()
+            if not query:
+                return Response([])
 
-        node_type = request.query_params.get(
-            "type",
-            None
-        )
+            print("Search query:", query)
+            
+            filters = Q(owner_id=request.user.id)
 
-        parent_id = request.query_params.get(
-            "parent_id",
-            None
-        )
+            filters &= Q(__raw__={"$text": {"$search": query}})
+            
+            if node_type:
+                filters &= Q(type=node_type)
 
-        if not query:
-            return Response([])
+            if parent_id:
+                try:
+                    parent = Node.objects.get(
+                        id=parent_id,
+                        owner_id=request.user.id
+                    )
+                    # Ensure we match the reference format stored in your DB
+                    filters &= Q(parent=parent.id) 
 
-        filters = Q(owner_id=request.user.id)
+                except Node.DoesNotExist:
+                    return Response(
+                        {"error": "Folder not found"},
+                        status=404
+                    )
 
-        # SEARCH BY NAME
-        filters &= Q(name__icontains=query)
+            nodes = Node.objects.filter(filters).order_by("-created_at")
 
-        # FILTER TYPE
-        if node_type:
-            filters &= Q(type=node_type)
+            paginator = StandardResultsPagination()
+            page = paginator.paginate_queryset(nodes, request)
 
-        # FILTER FOLDER
-        if parent_id:
+            serializer = NodeListSerializer(
+                page,
+                many=True,
+                context={"request": request}
+            )
 
-            try:
-
-                parent = Node.objects.get(
-                    id=parent_id,
-                    owner_id=request.user.id
-                )
-
-                filters &= Q(parent=parent)
-
-            except Node.DoesNotExist:
-
-                return Response(
-                    {"error": "Folder not found"},
-                    status=404
-                )
-
-        nodes = Node.objects.filter(
-            filters
-        ).order_by("-created_at")[:50]
-
-        serializer = NodeListSerializer(
-            nodes,
-            many=True,
-            context={
-                "request": request
-            }
-        )
-        return Response(serializer.data)
+            return paginator.get_paginated_response(serializer.data)
     
 
 class SearchUsersView(APIView):
@@ -958,7 +1487,8 @@ class SearchUsersView(APIView):
             return Response([])
 
         users = User.objects.filter(
-            username__icontains=query
+            username__icontains=query,
+             is_active=True
         ).exclude(
             id=request.user.id
         )[:10]
@@ -985,3 +1515,154 @@ def CheckUserDiskView(request):
     )
 
     return Response(data)
+
+class RenameNodeView(BaseAPIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(
+        self,
+        request,
+        node_id
+    ):
+
+        node = self.get_node(node_id)
+
+        ensure_owner(
+            node,
+            request.user
+        )
+
+        new_name = request.data.get(
+            "name"
+        )
+
+        if not new_name:
+            return self.error(
+                "Name required"
+            )
+
+        existing = Node.objects.filter(
+            owner_id=request.user.id,
+            parent=node.parent,
+            name=new_name
+        ).exclude(
+            id=node.id
+        ).first()
+
+        if existing:
+            return self.error(
+                "Already exists"
+            )
+
+        node.name = new_name
+        node.save()
+
+        return self.success({
+            "message": "Renamed"
+        })
+    
+
+class MoveNodeView(BaseAPIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(
+        self,
+        request,
+        node_id
+    ):
+
+        node = self.get_node(node_id)
+
+        ensure_owner(
+            node,
+            request.user
+        )
+
+        parent_id = request.data.get(
+            "parent_id"
+        )
+
+        parent = None
+
+        if parent_id:
+            parent = self.get_node(
+                parent_id,
+                "FOLDER"
+            )
+
+            if str(node.id) == str(parent.id):
+                return self.error(
+                    "Cannot move folder into itself"
+                )
+            
+        if parent and node.type == "FOLDER":
+            if is_descendant(node, parent):
+                return self.error(
+                    "Cannot move folder into its child"
+                )
+
+        node.parent = parent
+        node.save()
+
+        return self.success({
+            "message": "Moved"
+        })
+    
+class FilePreviewView(BaseAPIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def get(
+        self,
+        request,
+        file_id
+    ):
+
+        node = self.get_node(
+            file_id,
+            node_type="FILE"
+        )
+
+        if not self.check_node_access(
+            node,
+            request.user
+        ):
+            return self.error(
+                "Access denied",
+                403
+            )
+        
+        if not os.path.exists(node.file_path):
+            raise Http404("File missing")
+        
+        mime = get_mime_type(
+            node.file_path
+        )
+        if not os.path.exists(node.file_path):
+            raise Http404("File missing")
+        
+        return FileResponse(
+            open(node.file_path, "rb"),
+            content_type=mime
+        )
+    
+class AdminDashboardStatsView(APIView):
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        
+        return Response({
+            "users": User.objects.count(),
+            "files": Node.objects.filter(
+                type="FILE"
+            ).count(),
+            "folders": Node.objects.filter(
+                type="FOLDER"
+            ).count(),
+            "active_disks": StorageDisk.objects.filter(
+                is_active=True
+            ).count(),
+        })

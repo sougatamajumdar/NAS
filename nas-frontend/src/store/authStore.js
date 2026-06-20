@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import api from "@/services/api"
+import { useFileStore } from "./fileStore"
 
 export const useAuthStore = create( persist ((set) => ({
 
@@ -58,7 +59,10 @@ export const useAuthStore = create( persist ((set) => ({
     try {
 
       await api.post("/auth/logout/")
+      
+      useFileStore.getState().resetStore()
 
+      useFileStore.persist.clearStorage()
       set({
         user: null
       })
