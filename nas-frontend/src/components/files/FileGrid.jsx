@@ -1,7 +1,8 @@
 import FileCard from "./FileCard"
 
 export default function FileGrid({
-  nodes
+  nodes,
+  onUnshare = null
 }) {
   console.log("Rendering FileGrid with nodes:", nodes)
   if (!nodes.length) {
@@ -48,6 +49,14 @@ export default function FileGrid({
         <FileCard
           key={node.id}
           node={node}
+          onUnshare={
+            onUnshare
+              ? () =>
+                  onUnshare(
+                    node.share_id,
+                  )
+              : undefined
+          }
         />
 
       ))}

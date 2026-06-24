@@ -184,12 +184,14 @@ class UploadSession(Document):
 # Share Model
 # -------------------------------
 class Share(Document):
-
+    
     node = ReferenceField(
         Node,
         required=True,
         reverse_delete_rule=CASCADE
     )
+
+    shared_by_id = IntField(required=True) 
 
     shared_with_id = IntField(required=True)
 
@@ -202,9 +204,9 @@ class Share(Document):
     meta = {
         "collection": "shares",
         "indexes": [
+            "shared_by_id",  
             "shared_with_id",
             "node",
-            ("shared_with_id", "node"),
             {
                 "fields": [
                     "shared_with_id",

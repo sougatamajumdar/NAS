@@ -13,7 +13,7 @@ from .pagination import StandardResultsPagination
 from .permissions import ensure_owner
 from .utils.file import generate_thumbnail, is_image, get_mime_type
 from .models import BackupRecord, Node, Share, StorageDisk, UploadSession, UserStorageMapping
-from .serializers import ( AdminCreateUserSerializer, AdminUserListSerializer, BackupCreateSerializer, CreateFolderSerializer, FileUploadSerializer, InitiateUploadSerializer, LoginSerializer, 
+from .serializers import ( AdminCreateUserSerializer, AdminUserListSerializer, BackupCreateSerializer, CreateFolderSerializer, FileUploadSerializer, InitiateUploadSerializer, LoginSerializer, MySharedNodeSerializer, 
                           NodeListSerializer, ShareSerializer, SharedNodeSerializer, 
                           StorageDiskSerializer, StorageDiskListSerializer )
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
@@ -31,11 +31,17 @@ import psutil
 import shutil
 from collections import defaultdict
 from mongoengine.queryset.visitor import Q
+from mongoengine.errors import NotUniqueError
 from io import BytesIO
 from pathlib import Path
+import re
+# import logging
 
 
 User = get_user_model()
+
+# logger = logging.getLogger("storage")
+
 
 from .mixins import (
     ResponseMixin,
@@ -740,16 +746,34 @@ class ShareNodeView(APIView):
         )
 
         if not serializer.is_valid():
-            return Response(serializer.errors, status=400)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
+        node = data["node"]
 
-        share = Share(
-            node=data["node"],
-            shared_with_id=data["shared_user"].id,
-            permission="VIEW"
-        )
-        share.save()
+        # SECURITY CHECK: Ensure the current user actually owns the node they are sharing
+        if node.owner_id != request.user.id:
+            return Response(
+                {"error": "You do not have permission to share this file."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            # Build share object using the new schema structure
+            share = Share(
+                node=node,
+                shared_by_id=request.user.id,     # Track who is sharing the file
+                shared_with_id=data["shared_user"].id,
+                permission="VIEW"                 # Change this to data.get("permission", "VIEW") if dynamic
+            )
+            share.save()
+
+        except NotUniqueError: 
+            # Gracefully catch the unique index constraint violation
+            return Response(
+                {"error": "This file is already shared with this user."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         return Response({
             "message": "Shared successfully"
@@ -760,25 +784,30 @@ class SharedWithMeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # Querying the database efficiently using your indexed field
         shares = Share.objects.filter(
             shared_with_id=request.user.id
         ).order_by("-created_at")
 
         paginator = StandardResultsPagination()
-
+        
+        # Paginate the MongoEngine QuerySet
         page = paginator.paginate_queryset(
             shares,
-            request
+            request,
+            view=self
         )
 
         serializer = SharedNodeSerializer(
             page,
-            many=True
+            many=True,
+            context={"request": request}
         )
 
         return paginator.get_paginated_response(
             serializer.data
         )
+
     
 class ScanDisksView(APIView):
 
@@ -1423,53 +1452,53 @@ class StorageStatsView(APIView):
     
     
 class SearchNodeView(APIView):
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-            query = request.query_params.get("q", "").strip()
-            node_type = request.query_params.get("type", None)
-            parent_id = request.query_params.get("parent_id", None)
+        query = request.query_params.get("q", "").strip()
+        node_type = request.query_params.get("type", None)
+        parent_id = request.query_params.get("parent_id", None)
 
-            if not query:
-                return Response([])
+        if not query:
+            return Response([])
 
-            print("Search query:", query)
-            
-            filters = Q(owner_id=request.user.id)
+        # Escape special regex characters to prevent query injection
+        escaped_query = re.escape(query)
+        
+        # Start with owner filter
+        filters = Q(owner_id=request.user.id)
 
-            filters &= Q(__raw__={"$text": {"$search": query}})
-            
-            if node_type:
-                filters &= Q(type=node_type)
+        # Partial, case-insensitive match on the 'name' field (or change 'name' to your search field)
+        filters &= Q(__raw__={"name": {"$regex": escaped_query, "$options": "i"}})
+        
+        if node_type:
+            filters &= Q(type=node_type)
 
-            if parent_id:
-                try:
-                    parent = Node.objects.get(
-                        id=parent_id,
-                        owner_id=request.user.id
-                    )
-                    # Ensure we match the reference format stored in your DB
-                    filters &= Q(parent=parent.id) 
+        if parent_id:
+            try:
+                parent = Node.objects.get(
+                    id=parent_id,
+                    owner_id=request.user.id
+                )
+                filters &= Q(parent=parent.id) 
+            except Node.DoesNotExist:
+                return Response(
+                    {"error": "Folder not found"},
+                    status=404
+                )
 
-                except Node.DoesNotExist:
-                    return Response(
-                        {"error": "Folder not found"},
-                        status=404
-                    )
+        nodes = Node.objects.filter(filters).order_by("-created_at")
 
-            nodes = Node.objects.filter(filters).order_by("-created_at")
+        paginator = StandardResultsPagination()
+        page = paginator.paginate_queryset(nodes, request)
 
-            paginator = StandardResultsPagination()
-            page = paginator.paginate_queryset(nodes, request)
+        serializer = NodeListSerializer(
+            page,
+            many=True,
+            context={"request": request}
+        )
 
-            serializer = NodeListSerializer(
-                page,
-                many=True,
-                context={"request": request}
-            )
-
-            return paginator.get_paginated_response(serializer.data)
+        return paginator.get_paginated_response(serializer.data)
     
 
 class SearchUsersView(APIView):
@@ -1614,17 +1643,13 @@ class FilePreviewView(BaseAPIView):
 
     permission_classes = [IsAuthenticated]
 
-    def get(
-        self,
-        request,
-        file_id
-    ):
-
+    def get(self, request, file_id):
+        print("get requesr##", file_id, request)
         node = self.get_node(
             file_id,
             node_type="FILE"
         )
-
+        
         if not self.check_node_access(
             node,
             request.user
@@ -1665,4 +1690,53 @@ class AdminDashboardStatsView(APIView):
             "active_disks": StorageDisk.objects.filter(
                 is_active=True
             ).count(),
+        })
+    
+
+class MySharedFilesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        shares = Share.objects.filter(shared_by_id=request.user.id)
+        
+        paginator = StandardResultsPagination()
+        
+        page = paginator.paginate_queryset(
+            shares,
+            request,
+            view=self
+        )
+    
+        serializer = MySharedNodeSerializer(
+            page,
+            many=True,
+            context={"request": request}
+        )
+
+        return paginator.get_paginated_response(
+            serializer.data
+        )
+
+    
+class UnshareNodeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, share_id):
+        try:
+            print("shred##", share_id)
+            share = Share.objects.get(
+                id=share_id,
+                shared_by_id=request.user.id
+            )
+        except Share.DoesNotExist:
+            # Returns 404 whether the ID is fake OR if it belongs to someone else
+            return Response(
+                {"error": "Share record not found or permission denied"},
+                status=404
+            )
+
+        share.delete()
+
+        return Response({
+            "message": "File unshared successfully"
         })

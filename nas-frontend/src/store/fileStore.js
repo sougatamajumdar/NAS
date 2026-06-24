@@ -20,10 +20,9 @@ export const useFileStore = create(
       fileLoading: false,
 
       uploads: [],
-
       folderStack: [],
-
       sharedNodes: [],
+      sharedByMeNodes: [],
 
       searchQuery: "",
 
@@ -44,6 +43,19 @@ export const useFileStore = create(
       diskStatusLoading: false,
       hasActiveDisk: false,
       canAllocateDisk: false,
+      sharedPagination: {
+        count: 0,
+        next: null,
+        previous: null,
+        currentPage: 1,
+      },
+
+      sharedByMePagination: {
+        count: 0,
+        next: null,
+        previous: null,
+        currentPage: 1,
+      },
       // =========================
       // UPLOAD HELPERS
       // =========================
@@ -356,16 +368,54 @@ export const useFileStore = create(
       // SHARED
       // =========================
 
-      fetchSharedNodes: async () => {
+      fetchSharedNodes: async (page = 1) => {
 
+        const response =
+          await api.get(
+            `/shared/?page=${page}`
+          )
+
+        set({
+          sharedNodes:
+            response.data.results || [],
+
+          sharedPagination: {
+            count:
+              response.data.count || 0,
+
+            next:
+              response.data.next,
+
+            previous:
+              response.data.previous,
+
+            currentPage: page,
+          },
+        })
+      },
+      fetchSharedByMeNodes: async (page = 1) => {
         try {
 
-          const response =
-            await api.get("/shared/")
+          const response = await api.get(
+            `/share/my/?page=${page}`
+          )
 
           set({
-            sharedNodes:
-              response.data.results || []
+            sharedByMeNodes:
+              response.data.results || [],
+
+            pagination: {
+              count:
+                response.data.count || 0,
+
+              next:
+                response.data.next,
+
+              previous:
+                response.data.previous,
+
+              currentPage: page,
+            }
           })
 
         } catch (error) {
@@ -373,7 +423,34 @@ export const useFileStore = create(
           console.error(error)
         }
       },
+      unshareNode: async (
+        shareId
+      ) => {
+        console.log("node ##", shareId);
+        return await storeAction({
 
+          action: async () => {
+            console.log("id check::", shareId);
+            await api.delete(
+              `/share/${shareId}/`
+            )
+
+            await get().fetchSharedByMeNodes(
+              get().pagination.currentPage
+            )
+          },
+
+          set,
+
+          successMessage:
+            "Access removed",
+
+          errorMessage:
+            "Failed to remove access",
+
+          showSuccess: true,
+        })
+      },
       // =========================
       // STORAGE STATS
       // =========================
@@ -1352,6 +1429,7 @@ export const useFileStore = create(
         folderStack: [],
 
         sharedNodes: [],
+        sharedByMeNodes: [],
 
         searchQuery: "",
 

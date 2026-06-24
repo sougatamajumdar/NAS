@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import  ( AdminDashboardStatsView, AdminUserView, BackupView, CSRFView, CheckUserDiskView, FileDownloadView, FilePreviewView, FileThumbnailView, FileUploadView, 
-                     LoginView, LogoutView, MeView, MoveNodeView, NodeView, 
-                     DeleteNodeView, RenameNodeView, SearchNodeView, SearchUsersView, ShareNodeView, SharedWithMeView, StorageDiskView, 
+                     LoginView, LogoutView, MeView, MoveNodeView, MySharedFilesView, NodeView, 
+                     DeleteNodeView, RenameNodeView, SearchNodeView, SearchUsersView, ShareNodeView, SharedWithMeView, StorageDiskView, UnshareNodeView, 
                      delete_disk, disable_disk, ScanDisksView, StorageStatsView, InitiateUploadView,
                      UploadChunkView, CompleteUploadView, UploadStatusView, CancelUploadView )
 
@@ -21,21 +21,23 @@ urlpatterns = [
     # SHARING
     path('share/', ShareNodeView.as_view()),
     path('shared/', SharedWithMeView.as_view()),
+    path('share/my/', MySharedFilesView.as_view()),
+    path('share/<str:share_id>/', UnshareNodeView.as_view()),
 
     # SEARCH
-    path("search/", SearchNodeView.as_view()),
-    path("users/search/", SearchUsersView.as_view()),
+    path('search/', SearchNodeView.as_view()),
+    path('users/search/', SearchUsersView.as_view()),
 
     # STORAGE
-    path("storage/stats/", StorageStatsView.as_view()),
-    path("disk/status/", CheckUserDiskView),
+    path('storage/stats/', StorageStatsView.as_view()),
+    path('disk/status/', CheckUserDiskView),
 
     # CHUNK UPLOAD
-    path("upload/initiate/", InitiateUploadView.as_view()),
-    path("upload/chunk/", UploadChunkView.as_view()),
-    path("upload/complete/", CompleteUploadView.as_view()),
-    path("upload/status/<str:upload_id>/", UploadStatusView.as_view()),
-    path("upload/cancel/<str:upload_id>/", CancelUploadView.as_view()),
+    path('upload/initiate/', InitiateUploadView.as_view()),
+    path('upload/chunk/', UploadChunkView.as_view()),
+    path('upload/complete/', CompleteUploadView.as_view()),
+    path('upload/status/<str:upload_id>/', UploadStatusView.as_view()),
+    path('upload/cancel/<str:upload_id>/', CancelUploadView.as_view()),
 
     # ADMIN DISKS
     path('admin/disks/scan/', ScanDisksView.as_view()),
@@ -48,10 +50,7 @@ urlpatterns = [
     path('admin/users/<int:user_id>/', AdminUserView.as_view()),
 
     # ADMIN DASHBOARD
-    path(
-        'admin/dashboard/stats/',
-        AdminDashboardStatsView.as_view()
-    ),
+    path('admin/dashboard/stats/', AdminDashboardStatsView.as_view()),
 
     # BACKUPS
     path('admin/backups/', BackupView.as_view()),

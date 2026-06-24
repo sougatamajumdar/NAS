@@ -11,6 +11,7 @@ import {
   Folder,
   Share2,
   Trash2,
+  UserMinus,
 } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { useFileStore } from "@/store/fileStore"
@@ -19,7 +20,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 
-export default function FileCard({ node }) {
+export default function FileCard({ node, onUnshare = null }) {
   // console.log("Rendering FileCard for node:", node)
   const {
     fetchNodes,
@@ -88,7 +89,7 @@ export default function FileCard({ node }) {
         node,
         operation: "preview",
       })
-    console.log("validation result", validation)  // Debugging line
+    
     if (!validation.valid) {
 
       toast.error(
@@ -176,6 +177,14 @@ export default function FileCard({ node }) {
     }
 
     setShareOpen(true)
+  }
+
+  const handleUnshare = async (e) => {
+    e.stopPropagation()
+
+    if (!onUnshare) return
+
+    await onUnshare(node)
   }
 
   const isImage =
@@ -298,7 +307,44 @@ export default function FileCard({ node }) {
                       </button>
                     </>
                   )}
+                  {
+                    onUnshare ? (
 
+                      <button
+                        onClick={handleUnshare}
+                        className="
+                          h-9
+                          w-9
+                          rounded-xl
+                          glass
+                          flex
+                          items-center
+                          justify-center
+                          text-orange-400
+                        "
+                      >
+                        <UserMinus size={16} />
+                      </button>
+
+                    ) : (
+
+                      <button
+                        onClick={handleShare}
+                        className="
+                          h-9
+                          w-9
+                          rounded-xl
+                          glass
+                          flex
+                          items-center
+                          justify-center
+                        "
+                      >
+                        <Share2 size={16} />
+                      </button>
+
+                    )
+                  }
                   <button
                     onClick={handleDelete}
                     className="
@@ -392,12 +438,30 @@ export default function FileCard({ node }) {
               </>
             )}
 
-            <ContextMenuItem
-              onClick={handleShare}
-            >
-              <Share2 className="mr-2 h-4 w-4" />
-              Share
-            </ContextMenuItem>
+            {
+              onUnshare ? (
+
+                <ContextMenuItem
+                  onClick={() =>
+                    onUnshare(node)
+                  }
+                  className="text-orange-400"
+                >
+                  <UserMinus className="mr-2 h-4 w-4" />
+                  Remove Access
+                </ContextMenuItem>
+
+              ) : (
+
+                <ContextMenuItem
+                  onClick={handleShare}
+                >
+                  <Share2 className="mr-2 h-4 w-4" />
+                  Share
+                </ContextMenuItem>
+
+              )
+            }
 
             <ContextMenuItem
               onClick={() =>

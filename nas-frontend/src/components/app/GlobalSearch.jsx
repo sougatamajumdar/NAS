@@ -75,7 +75,7 @@ export default function GlobalSearch() {
       />
 
       <Input
-        placeholder="Search files, folders, users..."
+        placeholder="Search files, folders"
         value={searchQuery}
         onChange={handleSearch}
         className="

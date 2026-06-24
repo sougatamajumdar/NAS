@@ -65,17 +65,19 @@ class NodeListSerializer(serializers.Serializer):
     id = serializers.CharField(source="pk")
 
     name = serializers.CharField()
+    
     type = serializers.CharField()
-
+    
     size = serializers.IntegerField(default=0)
-
+    
     created_at = serializers.DateTimeField()
-
+    
     parent_id = serializers.SerializerMethodField()
+    
     parent_name = serializers.SerializerMethodField()
-
+    
     mime_type = serializers.SerializerMethodField()
-
+    
     thumbnail_url = serializers.SerializerMethodField()
 
     def get_parent_id(self, obj):
@@ -199,11 +201,21 @@ class ShareSerializer(serializers.Serializer):
     
 
 class SharedNodeSerializer(serializers.Serializer):
+    
     id = serializers.SerializerMethodField()
+    
     name = serializers.SerializerMethodField()
+    
     type = serializers.SerializerMethodField()
+    
     size = serializers.SerializerMethodField()
+    
     owner = serializers.SerializerMethodField()
+    
+    mime_type = serializers.SerializerMethodField()
+    
+    thumbnail_url = serializers.SerializerMethodField()
+    
     created_at = serializers.SerializerMethodField()
 
     def get_id(self, obj):
@@ -220,6 +232,15 @@ class SharedNodeSerializer(serializers.Serializer):
 
     def get_created_at(self, obj):
         return obj.node.created_at
+    
+    def get_mime_type(self, obj):
+
+        if obj.node.type != "FILE":
+            return None
+
+        mime, _ = mimetypes.guess_type(obj.node.name)
+
+        return mime or "application/octet-stream"
 
     def get_owner(self, obj):
         try:
@@ -230,6 +251,26 @@ class SharedNodeSerializer(serializers.Serializer):
             }
         except User.DoesNotExist:
             return None
+        
+    def get_thumbnail_url(self, obj):
+
+        request = self.context.get("request")
+
+        if obj.node.type != "FILE":
+            return None
+
+        mime, _ = mimetypes.guess_type(obj.node.name)
+
+        if not mime:
+            return None
+
+        if mime.startswith("image/"):
+
+            return request.build_absolute_uri(
+                f"/api/thumbnail/{obj.node.id}/"
+            )
+
+        return None
         
 
 class StorageDiskSerializer(serializers.Serializer):
@@ -446,3 +487,70 @@ class InitiateUploadSerializer(serializers.Serializer):
             data["parent"] = None
 
         return data
+    
+class MySharedNodeSerializer(serializers.Serializer):
+    id = serializers.SerializerMethodField()
+
+    share_id = serializers.CharField(source="pk")
+    
+    user_id = serializers.IntegerField(
+        source="shared_with_id"
+    )
+
+    username = serializers.SerializerMethodField()
+
+    name = serializers.SerializerMethodField()
+
+    size = serializers.SerializerMethodField()
+    mime_type = serializers.SerializerMethodField()
+    created_at = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+
+    def get_username(self, obj):
+
+        try:
+            user = User.objects.get(
+                id=obj.shared_with_id
+            )
+            return user.username
+        except User.DoesNotExist:
+            return None
+
+    def get_id(self, obj):
+        return str(obj.node.id)
+
+    def get_name(self, obj):
+        return obj.node.name
+
+    def get_size(self, obj):
+        return obj.node.size
+
+    def get_created_at(self, obj):
+        return obj.created_at
+    
+    def get_mime_type(self, obj):
+        if obj.node.type != "FILE":
+            return None
+
+        mime, _ = mimetypes.guess_type(obj.node.name)
+
+        return mime or "application/octet-stream"
+    
+    def get_thumbnail_url(self, obj):
+        request = self.context.get("request")
+
+        if obj.node.type != "FILE":
+            return None
+
+        mime, _ = mimetypes.guess_type(obj.node.name)
+
+        if not mime:
+            return None
+
+        if mime.startswith("image/"):
+
+            return request.build_absolute_uri(
+                f"/api/thumbnail/{obj.node.id}/"
+            )
+
+        return None
