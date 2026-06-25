@@ -1,15 +1,26 @@
 from django.core.management.base import BaseCommand
-from storage.services import cleanup_old_uploads
+
+from storage.maintenance import (
+    run_maintenance
+)
+
 
 class Command(BaseCommand):
 
-    help = "Cleanup stale upload sessions"
+    help = (
+        "Run NAS maintenance"
+    )
 
-    def handle(self, *args, **kwargs):
-        cleanup_old_uploads()
+    def handle(
+        self,
+        *args,
+        **kwargs
+    ):
+
+        run_maintenance()
 
         self.stdout.write(
             self.style.SUCCESS(
-                "Old uploads cleaned"
+                "Maintenance completed"
             )
         )
