@@ -426,11 +426,9 @@ export const useFileStore = create(
       unshareNode: async (
         shareId
       ) => {
-        console.log("node ##", shareId);
         return await storeAction({
 
           action: async () => {
-            console.log("id check::", shareId);
             await api.delete(
               `/share/${shareId}/`
             )
@@ -670,13 +668,10 @@ export const useFileStore = create(
 
         try {
 
-          const oldUrl =
-            get().previewUrl
+          const oldUrl = get().previewUrl
 
-          if (oldUrl) {
-            URL.revokeObjectURL(
-              oldUrl
-            )
+          if (oldUrl && oldUrl.startsWith("blob:")) {
+            URL.revokeObjectURL(oldUrl)
           }
 
           set({
@@ -687,6 +682,24 @@ export const useFileStore = create(
             previewUrl: null,
           })
 
+          const mime = file.mime_type || ""
+
+          // -----------------------------
+          // VIDEO
+          // -----------------------------
+          if (mime.startsWith("video/")) {
+
+            set({
+              previewUrl: `${api.defaults.baseURL}/stream/${file.id}`,
+              previewLoading: false,
+            })
+
+            return
+          }
+
+          // -----------------------------
+          // IMAGE / PDF / OTHER PREVIEW
+          // -----------------------------
           const response = await api.get(
             `/preview/${file.id}/`,
             {
@@ -694,10 +707,9 @@ export const useFileStore = create(
             }
           )
 
-          const blobUrl =
-            URL.createObjectURL(
-              response.data
-            )
+          const blobUrl = URL.createObjectURL(
+            response.data
+          )
 
           set({
             previewUrl: blobUrl,
@@ -708,28 +720,29 @@ export const useFileStore = create(
           console.error(error)
 
           set({
-            previewError:
-              "Failed to load preview",
+            previewError: "Failed to load preview",
           })
 
         } finally {
 
           set({
-            previewLoading: false
+            previewLoading: false,
           })
+
         }
+
       },
 
       closePreview: () => {
 
-        const { previewUrl } =
-          get()
+        const { previewUrl } = get()
 
-        if (previewUrl) {
-
-          URL.revokeObjectURL(
-            previewUrl
-          )
+        // Only revoke blob URLs
+        if (
+          previewUrl &&
+          previewUrl.startsWith("blob:")
+        ) {
+          URL.revokeObjectURL(previewUrl)
         }
 
         set({
@@ -739,6 +752,7 @@ export const useFileStore = create(
           previewLoading: false,
           previewError: null,
         })
+
       },
 
       fetchDiskStatus: async () => {
@@ -803,14 +817,14 @@ export const useFileStore = create(
               canAllocateDisk
             } = get()
 
-            console.log(
-              "Disk validation status:",
-              diskStatus
-            )
-            console.log(
-              "Has active disk:",
-              hasActiveDisk
-            )
+            // console.log(
+            //   "Disk validation status:",
+            //   diskStatus
+            // )
+            // console.log(
+            //   "Has active disk:",
+            //   hasActiveDisk
+            // )
 
             // INVALID RESPONSE
             if (hasActiveDisk === undefined) {
@@ -825,7 +839,7 @@ export const useFileStore = create(
             if (!hasActiveDisk) {
 
               if (
-                operation === "upload" &&
+                (operation === "upload" || operation === "create") &&
                 canAllocateDisk
               ) {
 
@@ -842,10 +856,10 @@ export const useFileStore = create(
 
             const disks =
               diskStatus || []
-            console.log(
-              "All disks:",
-               diskStatus
-            )
+            // console.log(
+            //   "All disks:",
+            //    diskStatus
+            // )
             // ACTIVE + ONLINE DISKS
             const onlineDisks = disks.filter(
               (disk) =>

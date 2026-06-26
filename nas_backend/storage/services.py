@@ -288,6 +288,9 @@ def delete_node_recursive(node):
         if node.file_path and os.path.exists(node.file_path):
             try:
                 os.remove(node.file_path)
+                if node.thumbnail_path:
+                    if os.path.exists(node.thumbnail_path):
+                        os.remove(node.thumbnail_path)
             except Exception:
                 pass
 

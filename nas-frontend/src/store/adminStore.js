@@ -67,7 +67,7 @@ export const useAdminStore = create((set, get) => ({
         )
       ])
 
-      console.log("disksRes", disksRes)  // Debugging line
+      // console.log("disksRes", disksRes)  // Debugging line
 
       set({
         dashboardStats:

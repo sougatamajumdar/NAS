@@ -3,7 +3,7 @@ from .views import  ( AdminDashboardStatsView, AdminUserView, BackupView, CSRFVi
                      LoginView, LogoutView, MeView, MoveNodeView, MySharedFilesView, NodeView, 
                      DeleteNodeView, RenameNodeView, SearchNodeView, SearchUsersView, ShareNodeView, SharedWithMeView, StorageDiskView, UnshareNodeView, 
                      delete_disk, disable_disk, ScanDisksView, StorageStatsView, InitiateUploadView,
-                     UploadChunkView, CompleteUploadView, UploadStatusView, CancelUploadView )
+                     UploadChunkView, CompleteUploadView, UploadStatusView, CancelUploadView, VideoStreamView)
 
 urlpatterns = [
 
@@ -13,6 +13,7 @@ urlpatterns = [
     path('download/<str:file_id>/', FileDownloadView.as_view()),
     path('preview/<str:file_id>/', FilePreviewView.as_view()),
     path('thumbnail/<str:file_id>/', FileThumbnailView.as_view()),
+    path('stream/<str:file_id>', VideoStreamView.as_view()),
 
     path('delete/<str:node_id>/', DeleteNodeView.as_view()),
     path('rename/<str:node_id>/', RenameNodeView.as_view()),

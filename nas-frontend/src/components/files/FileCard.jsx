@@ -12,6 +12,7 @@ import {
   Share2,
   Trash2,
   UserMinus,
+  PlayCircle,
 } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { useFileStore } from "@/store/fileStore"
@@ -191,6 +192,11 @@ export default function FileCard({ node, onUnshare = null }) {
     node.mime_type?.startsWith(
       "image/"
     )
+  
+  const isVideo =
+    node.mime_type?.startsWith(
+      "video/"
+    )
 
   return (
     <>
@@ -250,12 +256,32 @@ export default function FileCard({ node, onUnshare = null }) {
                       to-transparent
                     "
                   >
-
-                    {isFolder ? (
-                      <Folder className="h-16 w-16 text-primary" />
-                    ) : (
-                      <File className="h-16 w-16 text-primary" />
-                    )}
+                {isVideo && (
+                  <video
+                    className="
+                      absolute
+                      inset-0
+                      flex
+                      items-center
+                      justify-center
+                      pointer-events-none
+                    "
+                    poster={node.thumbnail_url}
+                  >
+                    <PlayCircle
+                      className="
+                        h-12
+                        w-12
+                        text-white/80
+                      "
+                    />
+                  </video>
+                )}
+                {isFolder ? (
+                  <Folder className="h-16 w-16 text-primary" />
+                ) : (
+                  <File className="h-16 w-16 text-primary" />
+                )}
 
                   </div>
                 )}

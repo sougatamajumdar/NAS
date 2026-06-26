@@ -107,6 +107,8 @@ class Node(Document):
 
     file_hash = StringField()
     
+    thumbnail_path = StringField()
+    
     created_at = DateTimeField(
         default=datetime.datetime.utcnow
     )

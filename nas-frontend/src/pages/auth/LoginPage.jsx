@@ -27,6 +27,8 @@ import {
   ArrowRight,
   LockKeyhole,
   User2,
+  EyeOff,
+  Eye
 } from "lucide-react"
 
 import {
@@ -47,6 +49,8 @@ export default function LoginPage() {
   })
 
   const [error, setError] = useState("")
+
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleChange = (e) => {
 
@@ -433,7 +437,6 @@ export default function LoginPage() {
                 </label>
 
                 <div className="relative">
-
                   <LockKeyhole
                     className="
                       absolute
@@ -445,9 +448,8 @@ export default function LoginPage() {
                       text-muted-foreground
                     "
                   />
-
                   <Input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     placeholder="Enter password"
                     name="password"
                     value={formData.password}
@@ -460,7 +462,27 @@ export default function LoginPage() {
                       rounded-2xl
                     "
                   />
-
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="
+                      absolute
+                      right-2
+                      top-1/2
+                      -translate-y-1/2
+                      h-8
+                      w-8
+                      hover:bg-transparent
+                    "
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
 
               </div>

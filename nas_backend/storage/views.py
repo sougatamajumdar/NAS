@@ -11,14 +11,14 @@ from rest_framework.parsers import MultiPartParser
 
 from .pagination import StandardResultsPagination
 from .permissions import ensure_owner
-from .utils.file import generate_thumbnail, is_image, get_mime_type
+from .utils.file import generate_thumbnail, is_image, get_mime_type, generate_video_thumbnail
 from .models import BackupRecord, Node, Share, StorageDisk, UploadSession, UserStorageMapping
 from .serializers import ( AdminCreateUserSerializer, AdminUserListSerializer, BackupCreateSerializer, CreateFolderSerializer, FileUploadSerializer, InitiateUploadSerializer, LoginSerializer, MySharedNodeSerializer, 
                           NodeListSerializer, ShareSerializer, SharedNodeSerializer, 
                           StorageDiskSerializer, StorageDiskListSerializer )
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from .services import create_disk_backup, create_user_backup, delete_user_and_data, get_available_disk, delete_node_recursive, get_user_disk_status, is_descendant, is_disk_empty, refresh_disk_usage
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, StreamingHttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from django.contrib.auth import (
     get_user_model,
@@ -35,6 +35,8 @@ from mongoengine.errors import NotUniqueError
 from io import BytesIO
 from pathlib import Path
 import re
+import tempfile
+import subprocess
 # import logging
 
 
@@ -58,11 +60,19 @@ class BaseAPIView(
 ):
     pass
 
-class FileThumbnailView(BaseAPIView):
+class FileThumbnailView(
+    BaseAPIView
+):
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [
+        IsAuthenticated
+    ]
 
-    def get(self, request, file_id):
+    def get(
+        self,
+        request,
+        file_id
+    ):
 
         node = self.get_node(
             file_id,
@@ -78,13 +88,41 @@ class FileThumbnailView(BaseAPIView):
                 403
             )
 
-        if not os.path.exists(node.file_path):
-            raise Http404("File missing")
+        mime, _ = mimetypes.guess_type(
+            node.name
+        )
 
-        if not is_image(node.name):
-            raise Http404("Not image")
+        # IMAGE
+        if mime and mime.startswith("image/"):
 
-        return generate_thumbnail(node.file_path) 
+            return generate_thumbnail(
+                node.file_path
+            )
+
+        # VIDEO
+        if (
+            mime
+            and
+            mime.startswith("video/")
+            and
+            node.thumbnail_path
+            and
+            os.path.exists(
+                node.thumbnail_path
+            )
+        ):
+
+            return FileResponse(
+                open(
+                    node.thumbnail_path,
+                    "rb"
+                ),
+                content_type="image/jpeg"
+            )
+
+        raise Http404(
+            "Thumbnail unavailable"
+        )
 
 class NodeView(APIView):
     permission_classes = [IsAuthenticated]
@@ -244,6 +282,36 @@ class FileUploadView(APIView):
             file_path=file_path,
             size=file.size
         )
+
+        node.save()
+        
+        mime, _ = mimetypes.guess_type(
+            file.name
+        )
+
+        if mime and mime.startswith("video/"):
+
+            thumb_dir = os.path.join(
+                disk.mount_path,
+                "thumbnails"
+            )
+
+            os.makedirs(
+                thumb_dir,
+                exist_ok=True
+            )
+
+            thumb_path = os.path.join(
+                thumb_dir,
+                f"{node.id}.jpg"
+            )
+
+            generate_video_thumbnail(
+                file_path,
+                thumb_path
+            )
+
+            node.thumbnail_path = thumb_path
         node.save()
 
         # update disk usage
@@ -284,10 +352,12 @@ class InitiateUploadView(APIView):
 
         upload_id = str(uuid.uuid4())
 
-        temp_path = os.path.join(
-            disk.mount_path,
-            "temp_uploads",
-            upload_id
+        temp_path = os.path.abspath(
+            os.path.join(
+                disk.mount_path,
+                "temp_uploads",
+                upload_id
+            )
         )
 
         os.makedirs(temp_path, exist_ok=True)
@@ -446,34 +516,21 @@ class CompleteUploadView(BaseAPIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-
-        upload_id = request.data.get(
-            "upload_id"
-        )
+        upload_id = request.data.get("upload_id")
 
         try:
-
-            session = self.get_upload_session(
-                upload_id,
-                request.user.id
-            )
-
+            session = self.get_upload_session(upload_id, request.user.id)
         except UploadSession.DoesNotExist:
+            return Response({"error": "Upload not found"}, status=404)
 
-            return Response({
-                "error": "Upload not found"
-            }, status=404)
+        # FIX 1: Prevent Race Conditions (Check status early)
+        if session.is_completed:
+            return Response({"error": "Upload already completed"}, status=400)
 
         if len(session.uploaded_chunks) != session.total_chunks:
+            return Response({"error": "Missing chunks"}, status=400)
 
-            return Response({
-                "error": "Missing chunks"
-            }, status=400)
-
-        ext = os.path.splitext(
-            session.filename
-        )[1]
-
+        ext = os.path.splitext(session.filename)[1]
         unique_name = f"{uuid.uuid4()}{ext}"
 
         mapping = UserStorageMapping.objects.filter(
@@ -482,92 +539,48 @@ class CompleteUploadView(BaseAPIView):
         ).first()
         
         if not mapping:
-            return Response(
-                {
-                    "error": "Storage mapping not found"
-                },
-                status=400
-            )
+            return Response({"error": "Storage mapping not found"}, status=400)
         
-        final_path = os.path.join(
-            mapping.storage_path,
-            unique_name
-        )
-
-        os.makedirs(
-            mapping.storage_path,
-            exist_ok=True
-        )
-        usage = shutil.disk_usage(
-            session.disk.mount_path
-        )
-
+        final_path = os.path.join(mapping.storage_path, unique_name)
+        os.makedirs(mapping.storage_path, exist_ok=True)
+        
+        usage = shutil.disk_usage(session.disk.mount_path)
         if usage.free < session.total_size:
-            return Response(
-                {"error": "Not enough disk space"},
-                status=400
-            )
+            return Response({"error": "Not enough disk space"}, status=400)
+
         try: 
             with open(final_path, "wb") as final_file:
                 missing = []
-                
                 for i in range(session.total_chunks):
-
-                    chunk_path = os.path.join(
-                        session.temp_path,
-                        f"{i}.part"
-                    )
+                    chunk_path = os.path.join(session.temp_path, f"{i}.part")
 
                     if not os.path.exists(chunk_path):
                         missing.append(i)
                         continue
 
                     with open(chunk_path, "rb") as chunk_file:
-                        shutil.copyfileobj(
-                            chunk_file,
-                            final_file
-                        )
+                        shutil.copyfileobj(chunk_file, final_file)
+                        
             if missing:
-
                 if os.path.exists(final_path):
                     os.remove(final_path)
-
-                return Response(
-                    {
-                        "error": "Missing chunks",
-                        "missing": missing
-                    },
-                    status=400
-                )
+                return Response({"error": "Missing chunks", "missing": missing}, status=400)
 
         except Exception as e:
-
             if os.path.exists(final_path):
                 os.remove(final_path)
-
-            return Response(
-                {
-                    "error": str(e)
-                },
-                status=500
-            )
-        if session.is_completed:
-            return Response({
-                "message": "Already completed"
-            }, status=200)
+            return Response({"error": str(e)}, status=500)
             
-        uploaded_hash = calculate_file_hash(
-            final_path
-        )
-
+        # Verify File Integrity
+        uploaded_hash = calculate_file_hash(final_path)
         if uploaded_hash != session.file_hash:
-
             os.remove(final_path)
+            # FIX 2: Clear chunks instantly on compromise/corruption to free space
+            shutil.rmtree(session.temp_path, ignore_errors=True)
+            session.delete()
+            return Response({"error": "File integrity check failed. Session terminated."}, status=400)
 
-            return Response({
-                "error": "File integrity check failed"
-            }, status=400)
-
+        # Save Meta
         node = Node(
             name=session.filename,
             type="FILE",
@@ -578,16 +591,21 @@ class CompleteUploadView(BaseAPIView):
             size=session.total_size,
             file_hash=session.file_hash
         )
-
         node.save()
 
-        shutil.rmtree(
-            session.temp_path,
-            ignore_errors=True
-        )
+        # Handle Video Thumbnails
+        mime, _ = mimetypes.guess_type(session.filename)
+        if mime and mime.startswith("video/"):
+            thumb_dir = os.path.join(session.disk.mount_path, "thumbnails")
+            os.makedirs(thumb_dir, exist_ok=True)
+            thumb_path = os.path.join(thumb_dir, f"{node.id}.jpg")
+            generate_video_thumbnail(final_path, thumb_path)
+            node.thumbnail_path = thumb_path
+            node.save()
 
+        # Clean up temporary resources safely
+        shutil.rmtree(session.temp_path, ignore_errors=True)
         session.delete()
-
         refresh_disk_usage(session.disk)
 
         return Response({
@@ -1173,100 +1191,56 @@ class AdminUserView(APIView):
     
 
 class BackupView(APIView):
-
     permission_classes = [IsAdminUser]
 
-    # LIST BACKUPS
     def get(self, request):
-
-        backups = BackupRecord.objects.all().order_by(
-            "-created_at"
-        )
-
+        backups = BackupRecord.objects.all().order_by("-created_at")
         paginator = StandardResultsPagination()
+        page = paginator.paginate_queryset(backups, request)
 
-        page = paginator.paginate_queryset(
-            backups,
-            request
-        )
-
-        data = []
-
-        for backup in page:
-
-            data.append({
-                "id": str(backup.id),
-                "backup_type": backup.backup_type,
-                "user_id": backup.user_id,
-                "backup_file": backup.backup_file,
-                "created_by": backup.created_by,
-                "created_at": backup.created_at
-            })
+        data = [{
+            "id": str(backup.id),
+            "backup_type": backup.backup_type,
+            "user_id": backup.user_id,
+            "backup_file": backup.backup_file,
+            "created_by": backup.created_by,
+            "created_at": backup.created_at
+        } for backup in page]
 
         return paginator.get_paginated_response(data)
 
-    # CREATE BACKUP
     def post(self, request):
-
-        serializer = BackupCreateSerializer(
-            data=request.data
-        )
-
+        serializer = BackupCreateSerializer(data=request.data)
         if not serializer.is_valid():
-            return Response(
-                serializer.errors,
-                status=400
-            )
+            return Response(serializer.errors, status=400)
 
         data = serializer.validated_data
 
-        # USER BACKUP
         if data["backup_type"] == "USER":
-
-            zip_path = create_user_backup(
-                data["user_id"]
-            )
-
+            zip_path = create_user_backup(data["user_id"])
             backup = BackupRecord(
                 backup_type="USER",
                 user_id=data["user_id"],
                 backup_file=zip_path,
                 created_by=request.user.id
             )
-
             backup.save()
-
-        # DISK BACKUP
         else:
-
+            # FIX 3: Solved syntax termination cutoff
             try:
-                disk = StorageDisk.objects.get(
-                    id=data["disk_id"]
+                disk = StorageDisk.objects.get(id=data["disk_id"])
+                zip_path = create_disk_backup(disk)
+                backup = BackupRecord(
+                    backup_type="DISK",
+                    disk=disk,
+                    backup_file=zip_path,
+                    created_by=request.user.id
                 )
-
+                backup.save()
             except StorageDisk.DoesNotExist:
+                return Response({"error": "Disk track target not found"}, status=404)
 
-                return Response({
-                    "error": "Disk not found"
-                }, status=404)
-
-            zip_path = create_disk_backup(
-                disk
-            )
-
-            backup = BackupRecord(
-                backup_type="DISK",
-                disk=disk,
-                backup_file=zip_path,
-                created_by=request.user.id
-            )
-
-            backup.save()
-
-        return Response({
-            "message": "Backup created",
-            "backup_file": zip_path
-        }, status=201)
+        return Response({"message": "Backup created successfully"}, status=201)
     
 
 class LoginView(APIView):
@@ -1542,7 +1516,7 @@ def CheckUserDiskView(request):
     data = get_user_disk_status(
         request.user.id
     )
-
+    print("#####", data)
     return Response(data)
 
 class RenameNodeView(BaseAPIView):
@@ -1668,10 +1642,95 @@ class FilePreviewView(BaseAPIView):
         if not os.path.exists(node.file_path):
             raise Http404("File missing")
         
+        mime, _ = mimetypes.guess_type(node.name)
+
+        if mime and mime.startswith("video/"):
+
+            response = FileResponse(
+                open(node.file_path, "rb"),
+                content_type=mime
+            )
+
+            response["Accept-Ranges"] = "bytes"
+
+            return response
+        
         return FileResponse(
             open(node.file_path, "rb"),
             content_type=mime
         )
+    
+class VideoStreamView(BaseAPIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, file_id):
+
+        node = self.get_node(
+            file_id,
+            node_type="FILE"
+        )
+
+        ensure_owner(
+            node,
+            request.user
+        )
+
+        file_path = node.file_path
+
+        file_size = os.path.getsize(file_path)
+
+        range_header = request.headers.get("Range")
+
+        if not range_header:
+
+            response = StreamingHttpResponse(
+                open(file_path, "rb"),
+                content_type="video/mp4"
+            )
+
+            response["Content-Length"] = file_size
+
+            return response
+
+        match = re.match(
+            r"bytes=(\d+)-(\d*)",
+            range_header
+        )
+
+        if not match:
+            return Response(status=416)
+
+        start = int(match.group(1))
+
+        end = (
+            int(match.group(2))
+            if match.group(2)
+            else file_size - 1
+        )
+
+        length = end - start + 1
+
+        file_obj = open(
+            file_path,
+            "rb"
+        )
+
+        file_obj.seek(start)
+
+        response = StreamingHttpResponse(
+            file_obj,
+            status=206,
+            content_type="video/mp4"
+        )
+
+        response["Content-Length"] = length
+        response["Content-Range"] = (
+            f"bytes {start}-{end}/{file_size}"
+        )
+        response["Accept-Ranges"] = "bytes"
+
+        return response
     
 class AdminDashboardStatsView(APIView):
 

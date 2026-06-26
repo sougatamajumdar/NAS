@@ -109,8 +109,14 @@ class NodeListSerializer(serializers.Serializer):
         if not mime:
             return None
 
+        # Images
         if mime.startswith("image/"):
+            return request.build_absolute_uri(
+                f"/api/thumbnail/{obj.id}/"
+            )
 
+        # Videos
+        if mime.startswith("video/"):
             return request.build_absolute_uri(
                 f"/api/thumbnail/{obj.id}/"
             )
@@ -265,7 +271,11 @@ class SharedNodeSerializer(serializers.Serializer):
             return None
 
         if mime.startswith("image/"):
+            return request.build_absolute_uri(
+                f"/api/thumbnail/{obj.node.id}/"
+            )
 
+        if mime.startswith("video/"):
             return request.build_absolute_uri(
                 f"/api/thumbnail/{obj.node.id}/"
             )
@@ -537,6 +547,7 @@ class MySharedNodeSerializer(serializers.Serializer):
         return mime or "application/octet-stream"
     
     def get_thumbnail_url(self, obj):
+
         request = self.context.get("request")
 
         if obj.node.type != "FILE":
@@ -548,7 +559,11 @@ class MySharedNodeSerializer(serializers.Serializer):
             return None
 
         if mime.startswith("image/"):
+            return request.build_absolute_uri(
+                f"/api/thumbnail/{obj.node.id}/"
+            )
 
+        if mime.startswith("video/"):
             return request.build_absolute_uri(
                 f"/api/thumbnail/{obj.node.id}/"
             )
