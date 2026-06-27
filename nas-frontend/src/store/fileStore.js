@@ -2,6 +2,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import api from "@/services/api"
 import { storeAction } from "@/store/storeActions"
+import generateId from "@/utils/generateid.js"
 import {
   sha256,
   createChunks,
@@ -502,7 +503,7 @@ export const useFileStore = create(
       ) => {
 
         const localId =
-          crypto.randomUUID()
+          generateId()
 
         const controller =
           new AbortController()
