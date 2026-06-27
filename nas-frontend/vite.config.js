@@ -29,7 +29,7 @@ export default defineConfig({
       }
     }
   ],
-  // base: '/static/',
+  base: '/static/',
   build: {
     // Compile all JS, CSS, and images straight into Django's static root
     outDir: path.resolve(__dirname, '../nas_backend/static'),

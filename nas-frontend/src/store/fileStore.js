@@ -839,7 +839,7 @@ export const useFileStore = create(
             if (!hasActiveDisk) {
 
               if (
-                (operation === "upload" || operation === "create") &&
+                (operation === "upload" || operation === "create" || operation === "delete") &&
                 canAllocateDisk
               ) {
 
