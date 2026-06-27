@@ -2,6 +2,7 @@ asgiref==3.11.1
 beautifulsoup4==4.15.0
 certifi==2026.6.17
 charset-normalizer==3.4.7
+decorator==5.3.1
 Django==6.0.5
 django-cors-headers==4.9.0
 django-rest-framework-mongoengine==3.4.1
@@ -9,8 +10,13 @@ djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
 dnspython==2.8.0
 idna==3.18
+ImageIO==2.37.3
+imageio-ffmpeg==0.6.0
 mongoengine==0.29.3
-pillow==12.2.0
+moviepy==2.2.1
+numpy==2.5.0
+pillow==11.3.0
+proglog==0.1.12
 psutil==7.2.2
 PyJWT==2.12.1
 pymongo==4.17.0
@@ -18,5 +24,6 @@ python-dotenv==1.2.2
 requests==2.34.2
 soupsieve==2.8.4
 sqlparse==0.5.5
+tqdm==4.68.3
 typing_extensions==4.15.0
 urllib3==2.7.0
