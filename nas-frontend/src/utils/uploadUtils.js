@@ -1,17 +1,10 @@
+import { sha256 as sha256Hash } from "js-sha256"
+
 export async function sha256(file) {
+
   const buffer = await file.arrayBuffer()
 
-  const hashBuffer =
-    await crypto.subtle.digest(
-      "SHA-256",
-      buffer
-    )
-
-  return [...new Uint8Array(hashBuffer)]
-    .map((b) =>
-      b.toString(16).padStart(2, "0")
-    )
-    .join("")
+  return sha256Hash(buffer)
 }
 
 export function createChunks(
@@ -37,4 +30,3 @@ export function createChunks(
 
   return chunks
 }
-
