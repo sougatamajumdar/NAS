@@ -1,17 +1,17 @@
 import { Outlet } from "react-router-dom"
 
-import Sidebar
-  from "@/components/app/Sidebar"
+import Sidebar from "@/components/app/Sidebar"
 
-import Topbar
-  from "@/components/app/Topbar"
+import MobileSidebar from "@/components/app/MobileSidebar"
 
-import AppBackground
-  from "@/components/app/layout/AppBackground"
+import Topbar from "@/components/app/Topbar"
+
+import AppBackground from "@/components/app/layout/AppBackground"
 
 export default function AppLayout() {
 
   return (
+
     <div
       className="
         flex
@@ -24,13 +24,20 @@ export default function AppLayout() {
 
       <AppBackground />
 
+      {/* Desktop Sidebar */}
+
       <Sidebar />
+
+      {/* Mobile Drawer */}
+
+      <MobileSidebar />
 
       <div
         className="
           flex-1
           flex
           flex-col
+          min-w-0
           overflow-hidden
         "
       >
@@ -41,14 +48,20 @@ export default function AppLayout() {
           className="
             flex-1
             overflow-auto
-            p-6
+            p-3
+            sm:p-4
+            md:p-6
           "
         >
+
           <Outlet />
+
         </main>
 
       </div>
 
     </div>
+
   )
+
 }

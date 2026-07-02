@@ -95,7 +95,7 @@ export default function LoginPage() {
     <div
       className="
         relative
-        min-h-screen
+        min-h-[100dvh]
         overflow-hidden
         bg-background
         text-foreground
@@ -103,6 +103,10 @@ export default function LoginPage() {
         items-center
         justify-center
         px-4
+        sm:px-6
+        lg:px-8
+
+        py-6
       "
     >
 
@@ -121,8 +125,12 @@ export default function LoginPage() {
           absolute
           top-0
           left-0
-          h-[500px]
-          w-[500px]
+          h-[250px]
+          w-[250px]
+          sm:h-[350px]
+          sm:w-[350px]
+          lg:h-[500px]
+          lg:w-[500px]
           rounded-full
           bg-blue-500/10
           blur-3xl
@@ -134,8 +142,12 @@ export default function LoginPage() {
           absolute
           bottom-0
           right-0
-          h-[500px]
-          w-[500px]
+          h-[250px]
+          w-[250px]
+          sm:h-[350px]
+          sm:w-[350px]
+          lg:h-[500px]
+          lg:w-[500px]
           rounded-full
           bg-purple-500/10
           blur-3xl
@@ -156,17 +168,19 @@ export default function LoginPage() {
         }}
 
         transition={{
-          duration: 0.5
+            duration: 0.45,
+            ease: "easeOut"
         }}
 
         className="
           relative
           z-10
           w-full
-          max-w-6xl
+          max-w-7xl
           grid
           lg:grid-cols-2
           gap-8
+          xl:gap-16
           items-center
         "
       >
@@ -194,19 +208,22 @@ export default function LoginPage() {
 
             <div
               className="
-                h-16
-                w-16
-                rounded-3xl
+                h-14
+                w-14
+                sm:h-16
+                sm:w-16
+                rounded-2xl sm:rounded-3xl
                 bg-primary
                 text-white
                 flex
                 items-center
                 justify-center
-                shadow-2xl
+                shadow-xl
+                sm:shadow-2xl
               "
             >
 
-              <HardDrive size={30} />
+              <HardDrive className="h-7 w-7 sm:h-8 sm:w-8" />
 
             </div>
 
@@ -214,7 +231,8 @@ export default function LoginPage() {
 
               <h1
                 className="
-                  text-5xl
+                  text-4xl
+                  xl:text-5xl
                   font-black
                   tracking-tight
                 "
@@ -257,7 +275,7 @@ export default function LoginPage() {
 
           <div
             className="
-              mt-10
+              mt-8 lg:mt-10
               grid
               gap-4
             "
@@ -287,20 +305,26 @@ export default function LoginPage() {
 
         {/* RIGHT SIDE */}
 
-        <Card
-          className="
-            glass
-            border-white/10
-            shadow-2xl
-            rounded-3xl
-            overflow-hidden
-          "
-        >
+          <Card
+            className="
+              glass
+              border-white/10
+              shadow-xl
+              sm:shadow-2xl
+              rounded-2xl
+              sm:rounded-3xl
+              overflow-hidden
+              w-full
+              max-w-md
+              lg:max-w-xl
+              mx-auto
+            "
+          >
 
           <CardContent
             className="
-              p-8
-              md:p-10
+            p-6 sm:p-8 
+            lg:p-10
             "
           >
 
@@ -318,9 +342,11 @@ export default function LoginPage() {
 
               <div
                 className="
-                  h-16
-                  w-16
-                  rounded-3xl
+                  h-14
+                  w-14
+                  sm:h-16
+                  sm:w-16
+                  rounded-2xl sm:rounded-3xl
                   bg-primary
                   text-white
                   flex
@@ -330,13 +356,13 @@ export default function LoginPage() {
                 "
               >
 
-                <HardDrive size={28} />
+                <HardDrive className="h-7 w-7 sm:h-8 sm:w-8" />
 
               </div>
 
               <h1
                 className="
-                  text-3xl
+                  text-2xl sm:text-3xl
                   font-bold
                 "
               >
@@ -347,23 +373,26 @@ export default function LoginPage() {
 
             {/* TITLE */}
 
-            <div className="mb-8">
+            <div className="mb-6 sm:mb-8">
 
               <h2
                 className="
-                  text-3xl
-                  font-bold
-                  tracking-tight
+                text-2xl
+                sm:text-3xl
+                font-bold
+                tracking-tight
                 "
               >
                 Welcome Back
               </h2>
 
               <p
-                className="
-                  mt-2
-                  text-muted-foreground
-                "
+              className="
+                mt-2
+                text-sm
+                sm:text-base
+                text-muted-foreground
+              "
               >
                 Sign in to access your
                 personal storage system.
@@ -375,7 +404,7 @@ export default function LoginPage() {
 
             <form
               onSubmit={handleSubmit}
-              className="space-y-5"
+              className="space-y-4 sm:space-y-5"
             >
 
               {/* USERNAME */}
@@ -407,12 +436,15 @@ export default function LoginPage() {
 
                   <Input
                     placeholder="Enter username"
+                    autoFocus
                     name="username"
                     value={formData.username}
                     onChange={handleChange}
+                    autoComplete="username"
                     className="
                       pl-10
-                      h-12
+                      h-12 sm:h-14
+                      text-base
                       bg-white/5
                       border-white/10
                       rounded-2xl
@@ -454,11 +486,13 @@ export default function LoginPage() {
                     name="password"
                     value={formData.password}
                     onChange={handleChange}
+                    autoComplete="current-password"
                     className="
                       pl-10
-                      h-12
+                      h-12 sm:h-14
                       bg-white/5
                       border-white/10
+                      text-base
                       rounded-2xl
                     "
                   />
@@ -472,8 +506,9 @@ export default function LoginPage() {
                       right-2
                       top-1/2
                       -translate-y-1/2
-                      h-8
-                      w-8
+                      h-10
+                      w-10
+                      text-sm sm:text-base
                       hover:bg-transparent
                     "
                   >
@@ -514,9 +549,9 @@ export default function LoginPage() {
                 disabled={loading}
                 className="
                   w-full
-                  h-12
+                  h-12 sm:h-14
                   rounded-2xl
-                  text-base
+                  text-sm sm:text-base
                   font-medium
                 "
               >
@@ -573,6 +608,7 @@ function FeatureCard({
         border-white/10
         rounded-2xl
         p-4
+        xl:p-5
         flex
         items-start
         gap-4
@@ -581,7 +617,7 @@ function FeatureCard({
 
       <div
         className="
-          h-12
+          h-12 sm:h-14
           w-12
           rounded-2xl
           bg-primary/20
@@ -600,6 +636,7 @@ function FeatureCard({
 
         <h3
           className="
+            text-base
             font-semibold
             mb-1
           "
@@ -610,6 +647,7 @@ function FeatureCard({
         <p
           className="
             text-sm
+            leading-6
             text-muted-foreground
           "
         >

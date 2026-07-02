@@ -1,3 +1,5 @@
+import { useState } from "react"
+
 import { Search, X } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -10,23 +12,29 @@ export default function GlobalSearch() {
 
   const location = useLocation()
 
-  const searchQuery = useFileStore(
-    (state) => state.searchQuery
-  )
+  const [focused, setFocused] =
+    useState(false)
 
-  const setSearchQuery = useFileStore(
-    (state) => state.setSearchQuery
-  )
+  const searchQuery =
+    useFileStore(
+      (state) => state.searchQuery
+    )
 
-  const searchNodes = useFileStore(
-    (state) => state.searchNodes
-  )
+  const setSearchQuery =
+    useFileStore(
+      (state) => state.setSearchQuery
+    )
 
-  const clearSearch = useFileStore(
-    (state) => state.clearSearch
-  )
+  const searchNodes =
+    useFileStore(
+      (state) => state.searchNodes
+    )
 
-  // ONLY SHOW IN THESE PAGES
+  const clearSearch =
+    useFileStore(
+      (state) => state.clearSearch
+    )
+
   const allowedRoutes = [
     "/drive",
     "/shared",
@@ -40,10 +48,12 @@ export default function GlobalSearch() {
     )
 
   if (!shouldShow) {
+
     return null
+
   }
 
-  const handleSearch = async (e) => {
+  const handleSearch = (e) => {
 
     const value = e.target.value
 
@@ -54,63 +64,120 @@ export default function GlobalSearch() {
       clearSearch()
 
       return
+
     }
 
     searchNodes(value)
+
   }
 
   return (
 
-    <div className="relative w-full max-w-xl">
+    <div
+      className="
+        w-full
+        max-w-full
+        lg:max-w-2xl
+        xl:max-w-3xl
+        mx-auto
+      "
+    >
 
-      <Search
-        size={18}
-        className="
-          absolute
-          left-4
-          top-1/2
-          -translate-y-1/2
-          text-muted-foreground
-        "
-      />
+      <div
+        className={`
+          relative
+          transition-all
+          duration-300
 
-      <Input
-        placeholder="Search files, folders"
-        value={searchQuery}
-        onChange={handleSearch}
-        className="
-          pl-11
-          pr-10
-          h-11
-          rounded-2xl
-          glass
-          border-white/10
-          bg-white/5
-          backdrop-blur-xl
-          focus-visible:ring-1
-          focus-visible:ring-primary
-        "
-      />
+          ${
+            focused
+              ? "scale-[1.01]"
+              : ""
+          }
+        `}
+      >
 
-      {searchQuery && (
-
-        <button
-          onClick={clearSearch}
+        <Search
           className="
             absolute
-            right-3
+            left-4
             top-1/2
             -translate-y-1/2
+            h-5
+            w-5
             text-muted-foreground
-            hover:text-foreground
+            pointer-events-none
           "
-        >
+        />
 
-          <X size={16} />
+        <Input
+          value={searchQuery}
+          onChange={handleSearch}
+          onFocus={() =>
+            setFocused(true)
+          }
+          onBlur={() =>
+            setFocused(false)
+          }
+          placeholder="Search files & folders..."
+          className="
+            h-11
+            md:h-12
 
-        </button>
-      )}
+            pl-12
+            pr-11
+
+            rounded-2xl
+
+            glass
+            bg-white/5
+            backdrop-blur-xl
+
+            border-white/10
+
+            transition-all
+            duration-300
+
+            focus-visible:ring-2
+            focus-visible:ring-primary
+          "
+        />
+
+        {searchQuery && (
+
+          <button
+            onClick={clearSearch}
+            className="
+              absolute
+              right-3
+              top-1/2
+              -translate-y-1/2
+
+              rounded-full
+
+              p-1
+
+              hover:bg-white/10
+
+              transition
+            "
+          >
+
+            <X
+              className="
+                h-4
+                w-4
+              "
+            />
+
+          </button>
+
+        )}
+
+      </div>
 
     </div>
+
   )
+
 }

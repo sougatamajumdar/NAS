@@ -6,19 +6,19 @@ import "./index.css"
 import router from "@/routes"
 
 import {
-  RouterProvider
+  RouterProvider,
 } from "react-router-dom"
 
 import {
-  useAuthStore
+  useAuthStore,
 } from "@/store/authStore"
 
 import {
-  Toaster
+  Toaster,
 } from "@/components/ui/sonner"
 
 import {
-  PhotoProvider
+  PhotoProvider,
 } from "react-photo-view"
 
 import ThemeProvider
@@ -26,20 +26,20 @@ import ThemeProvider
 
 import "react-photo-view/dist/react-photo-view.css"
 
-import { useThemeStore }
-from "@/store/themeStore"
+import {
+  useThemeStore,
+} from "@/store/themeStore"
 
 const savedTheme =
   useThemeStore
     .getState()
     .theme
 
-document.documentElement
-  .setAttribute(
-    "data-theme",
-    savedTheme
-  )
-  
+document.documentElement.setAttribute(
+  "data-theme",
+  savedTheme
+)
+
 useAuthStore
   .getState()
   .checkAuth()
@@ -60,7 +60,11 @@ ReactDOM.createRoot(
 
         <Toaster
           richColors
-          position="top-right"
+          position={
+            window.innerWidth < 640
+              ? "bottom-center"
+              : "top-right"
+          }
         />
 
       </PhotoProvider>
